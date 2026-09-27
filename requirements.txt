@@ -1,7 +1,9 @@
 flask
+flask-cors
+gunicorn
+pycryptodome
 requests
 aiohttp
-pycryptodome
-apscheduler
-pytz
 urllib3
+protobuf
+orjson
