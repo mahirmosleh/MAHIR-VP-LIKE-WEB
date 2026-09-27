@@ -1,20 +1,31 @@
-# app.py — MAHIR VIP LIKE — Single File Backend
+# app.py — MAHIR VIP LIKE — Complete Backend with Master Panel
 # ==========================================================
-#  Web:  http://<server>:5000/
-#  APIs:
-#    /mahir&like?uid={uid}&key={key}                          ← SHORT (default BD)
-#    /mahir&like?uid={uid}&key={key}&server_name=IND          ← SHORT + server
-#    /like?uid={uid}&server_name={server}&key={key}           ← FULL
-#    /health                                                   ← Status
-#    /auto/list                                                ← Auto targets
-#    /cron/auto_like?secret={secret}                           ← Vercel cron
-# ==========================================================
-#  auto.txt ফরম্যাট:
-#    [BD]
-#    1234567890
-#    9876543210
-#    [IND]
-#    5555555555
+#  Web:
+#    /              → User UI
+#    /master        → Master Admin Panel
+#
+#  Public APIs:
+#    /mahir&like?uid={uid}&key={key}                    ← SHORT (default BD)
+#    /mahir&like?uid={uid}&key={key}&server_name=IND    ← SHORT + server
+#    /like?uid={uid}&server_name={server}&key={key}     ← FULL
+#    /health
+#    /auto/list
+#    /cron/auto_like?secret={secret}
+#
+#  Master APIs (key required):
+#    GET    /master/api/files
+#    GET    /master/api/file?name=auto.txt
+#    POST   /master/api/file
+#    POST   /master/api/upload            (single file)
+#    POST   /master/api/auto/bulk-upload  (bulk UID upload)
+#    POST   /master/api/auto/add
+#    POST   /master/api/auto/remove
+#    POST   /master/api/auto/clear        (clear all UIDs for a server)
+#    GET    /master/api/keys
+#    POST   /master/api/keys
+#    GET    /master/api/stats
+#    POST   /master/api/run-auto
+#    POST   /master/api/jwt-refresh
 # ==========================================================
 
 import os
@@ -28,7 +39,8 @@ from threading import RLock
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, request, jsonify, Response, render_template
+from flask import (Flask, request, jsonify, Response, render_template,
+                   send_from_directory, abort)
 from flask_cors import CORS
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -39,7 +51,6 @@ import aiohttp
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ---------- Safe orjson ----------
 try:
     import orjson
     def _jsonify(data, status=200):
@@ -51,7 +62,6 @@ except ImportError:
                                    ensure_ascii=False),
                         status=status, mimetype='application/json')
 
-# ---------- Protobuf imports ----------
 import like_pb2
 import like_count_pb2
 import uid_generator_pb2
@@ -81,8 +91,7 @@ LIKE_CONCUR       = 200
 JWT_REFRESH_HOURS = 7
 AUTO_LIKE_HOUR    = 4
 AUTO_LIKE_MINUTE  = 10
-
-DAILY_LIMIT_USER = 1        # user key: 1 UID/day
+DAILY_LIMIT_USER  = 1
 
 SERVER_ACCOUNT_FILES = {
     "BD":  "account_bd.txt",
@@ -93,6 +102,17 @@ SERVER_ACCOUNT_FILES = {
     "NA":  "account_na.txt",
 }
 
+EDITABLE_FILES = [
+    "auto.txt",
+    "keys.json",
+    "account_bd.txt",
+    "account_ind.txt",
+    "account_br.txt",
+    "account_us.txt",
+    "account_sac.txt",
+    "account_na.txt",
+]
+
 CONFIG_RO_PATH = os.path.join(BASE_DIR, "keys.json")
 CONFIG_RW_PATH = os.path.join("/tmp", "keys.json")
 USAGE_PATH     = os.path.join("/tmp", "mahir_usage.json")
@@ -101,6 +121,7 @@ AUTO_FILE      = os.path.join(BASE_DIR, "auto.txt")
 config_lock = RLock()
 usage_lock  = RLock()
 jwt_lock    = RLock()
+file_lock   = RLock()
 
 # ============================================================
 #  CONFIG LOADER
@@ -190,14 +211,12 @@ def _save_usage(u):
 
 
 def check_and_consume_quota(api_key, uid, tier):
-    """Master = unlimited. User = 1 UID/day."""
-    if tier == "master" or tier == "auto":
+    if tier in ("master", "auto"):
         return True, None, None
 
     today = _today_str()
     u = _load_usage()
     entry = u.get(api_key, {})
-
     if entry.get("date") != today:
         entry = {"date": today, "uids": []}
 
@@ -215,7 +234,7 @@ def check_and_consume_quota(api_key, uid, tier):
 
 
 # ============================================================
-#  ACCOUNT LOADER (guest accounts per server)
+#  ACCOUNT LOADER
 # ============================================================
 def _account_path(server_name):
     f = SERVER_ACCOUNT_FILES.get(server_name.upper())
@@ -239,20 +258,12 @@ def load_accounts(server_name):
 
 
 # ============================================================
-#  AUTO.TXT LOADER — [SERVER] section format
+#  AUTO.TXT
 # ============================================================
 def load_auto_targets():
-    """
-    Read auto.txt:
-      [BD]
-      1234567890
-      [IND]
-      5555555555
-    Returns dict: {"BD": ["1234567890", ...], ...}
-    """
     if not os.path.exists(AUTO_FILE):
-        return {}
-    result = {}
+        return {srv: [] for srv in SERVER_ACCOUNT_FILES}
+    result = {srv: [] for srv in SERVER_ACCOUNT_FILES}
     current = None
     with open(AUTO_FILE, "r", encoding="utf-8") as f:
         for ln in f:
@@ -261,14 +272,11 @@ def load_auto_targets():
                 continue
             if ln.startswith("[") and ln.endswith("]"):
                 current = ln[1:-1].strip().upper()
-                if current in SERVER_ACCOUNT_FILES:
-                    result.setdefault(current, [])
-                else:
+                if current not in SERVER_ACCOUNT_FILES:
                     current = None
                 continue
             if current and ln.isdigit():
                 result[current].append(ln)
-    # dedupe
     for k in result:
         result[k] = list(dict.fromkeys(result[k]))
     return result
@@ -296,7 +304,7 @@ def register_auto_uid(server_name, uid):
 
 
 # ============================================================
-#  JWT (mahir-jwt-generator.vercel.app)
+#  JWT
 # ============================================================
 def _fetch_single_jwt(uid, pw, timeout=15):
     url = f"{JWT_API_BASE}?uid={uid}&password={pw}"
@@ -477,13 +485,12 @@ def parse_account_info(pb):
 
 
 # ============================================================
-#  CORE LIKE FLOW
+#  CORE LIKE
 # ============================================================
 _api_key_ctx = threading.local()
 
 
 def do_like(uid, server_name, tier="user"):
-    """Core like function. tier='user'|'master'|'auto'"""
     api_key = "_auto_" if tier == "auto" else getattr(_api_key_ctx, "key", "")
 
     allowed, remaining, reset_at = check_and_consume_quota(api_key, uid, tier)
@@ -508,21 +515,16 @@ def do_like(uid, server_name, tier="user"):
 
     token = tokens[0]
     encrypted = enc(uid)
-
     before = parse_account_info(make_request(encrypted, server_name, token))
     if before is None:
         return {
             "LikesGivenByAPI": 0, "LikesafterCommand": 0, "LikesbeforeCommand": 0,
             "PlayerNickname": "Unknown",
             "UID": int(uid) if str(uid).isdigit() else uid,
-            "GiftCount": 0,
-            "accounts_loaded": len(accounts),
-            "tokens_generated": len(tokens),
-            "server_name": server_name,
-            "tier": tier.upper(),
-            "quota_remaining": remaining,
-            "Owner": OWNER_HANDLE,
-            "status": 0,
+            "GiftCount": 0, "accounts_loaded": len(accounts),
+            "tokens_generated": len(tokens), "server_name": server_name,
+            "tier": tier.upper(), "quota_remaining": remaining,
+            "Owner": OWNER_HANDLE, "status": 0,
         }
 
     url = like_url_for(server_name)
@@ -551,12 +553,12 @@ def do_like(uid, server_name, tier="user"):
 
 
 # ============================================================
-#  AUTO-LIKE (4:10 AM) + JWT REFRESH (every 7h)
+#  AUTO-LIKE
 # ============================================================
 def do_auto_like_now():
     print(f"\n[AUTO-LIKE] start {datetime.now():%Y-%m-%d %H:%M:%S}")
     targets = load_auto_targets()
-    total_sent = 0
+    total = 0
     for srv, uids in targets.items():
         if not uids:
             continue
@@ -569,14 +571,15 @@ def do_auto_like_now():
             for uid in uids:
                 try:
                     ok = send_likes_from_all_tokens(uid, srv, url, tokens)
-                    total_sent += ok
+                    total += ok
                     print(f"[AUTO-LIKE] {srv} {uid} → {ok}")
                 except Exception as e:
                     print(f"[AUTO-LIKE] {srv} {uid} err: {e}")
                 time.sleep(0.5)
         except Exception as e:
             print(f"[AUTO-LIKE] {srv} err: {e}")
-    print(f"[AUTO-LIKE] done. total={total_sent}\n")
+    print(f"[AUTO-LIKE] done. total={total}\n")
+    return total
 
 
 def _auto_like_scheduler():
@@ -588,7 +591,7 @@ def _auto_like_scheduler():
             if now >= target:
                 target += timedelta(days=1)
             wait = (target - now).total_seconds()
-            print(f"[SCHED] next auto-like {target:%Y-%m-%d %H:%M:%S} ({wait/3600:.2f}h)")
+            print(f"[SCHED] next auto-like {target:%Y-%m-%d %H:%M:%S}")
             time.sleep(wait)
             do_auto_like_now()
         except Exception as e:
@@ -607,7 +610,6 @@ def _jwt_refresh_scheduler():
                     print(f"[JWT-REFRESH] {srv}: {len(toks)}")
                 except Exception as e:
                     print(f"[JWT-REFRESH] {srv} err: {e}")
-            print("[JWT-REFRESH] done\n")
         except Exception as e:
             print(f"[JWT-REFRESH] err: {e}")
             time.sleep(60)
@@ -620,7 +622,37 @@ def start_background_jobs():
 
 
 # ============================================================
-#  ROUTES
+#  MASTER HELPERS
+# ============================================================
+def _master_required(api_key):
+    return classify_key(api_key) == "master"
+
+
+def _safe_file_path(name):
+    if name not in EDITABLE_FILES:
+        return None
+    return os.path.join(BASE_DIR, name)
+
+
+def _read_file(name):
+    path = _safe_file_path(name)
+    if not path or not os.path.exists(path):
+        return ""
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _write_file(name, content):
+    path = _safe_file_path(name)
+    if not path:
+        raise ValueError("file not allowed")
+    with file_lock:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+
+# ============================================================
+#  ROUTES — USER
 # ============================================================
 @app.get("/")
 def index():
@@ -629,6 +661,17 @@ def index():
         brand=BRAND_NAME, dev=DEV_NAME, tg=TELEGRAM,
         tiktok=TIKTOK, website=WEBSITE,
         owner=OWNER_HANDLE, badge=BADGE_TEXT,
+    )
+
+
+@app.get("/master")
+def master_page():
+    return render_template(
+        "master.html",
+        brand=BRAND_NAME, dev=DEV_NAME, tg=TELEGRAM,
+        tiktok=TIKTOK, website=WEBSITE,
+        owner=OWNER_HANDLE, badge=BADGE_TEXT,
+        servers=list(SERVER_ACCOUNT_FILES.keys()),
     )
 
 
@@ -646,19 +689,16 @@ def route_health():
         "auto_like_at": f"{AUTO_LIKE_HOUR:02d}:{AUTO_LIKE_MINUTE:02d}",
         "jwt_refresh_hours": JWT_REFRESH_HOURS,
         "daily_limit_user": DAILY_LIMIT_USER,
-        "daily_limit_master": "unlimited",
         "auto_targets_loaded": {k: len(v) for k, v in load_auto_targets().items()},
         "endpoints": {
             "short": "/mahir&like?uid={uid}&key={key}",
-            "short_with_server": "/mahir&like?uid={uid}&key={key}&server_name={server}",
+            "short_server": "/mahir&like?uid={uid}&key={key}&server_name={server}",
             "full": "/like?uid={uid}&server_name={server}&key={key}",
-            "auto_list": "/auto/list",
-            "health": "/health",
+            "master": "/master",
         },
     })
 
 
-# ---------- FULL API: /like ----------
 @app.get("/like")
 def handle_like():
     try:
@@ -681,25 +721,17 @@ def handle_like():
             print(f"[auto-register] warn: {e}")
 
         result = do_like(uid, server_name, tier=tier)
-
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
             return jsonify(result), 500
-
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": "runtime_error", "detail": str(e)}), 500
 
 
-# ---------- SHORT API: /mahir&like ----------
 @app.get("/mahir&like")
 def mahir_like():
-    """
-    Short like endpoint.
-      /mahir&like?uid=1234567890&key=MAHIR-USER-001                 (default BD)
-      /mahir&like?uid=1234567890&key=MAHIR-USER-001&server_name=IND (server specified)
-    """
     try:
         uid = request.args.get("uid", "").strip()
         api_key = request.args.get("key", "").strip()
@@ -730,59 +762,24 @@ def mahir_like():
             }), 400
 
         _api_key_ctx.key = api_key
-
         try:
             register_auto_uid(server_name, uid)
         except Exception as e:
             print(f"[auto-register] warn: {e}")
 
         result = do_like(uid, server_name, tier=tier)
-
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
             return jsonify(result), 500
-
         return jsonify(result)
-
     except Exception as e:
         return jsonify({"error": "runtime_error", "detail": str(e)}), 500
-
-
-# ---------- AUTO endpoints ----------
-@app.post("/auto/add")
-def auto_add():
-    try:
-        api_key = (request.args.get("key") or "").strip()
-        if classify_key(api_key) != "master":
-            return jsonify({"error": "Master key required"}), 403
-        data = request.get_json(silent=True) or {}
-        uid = str(data.get("uid", "")).strip()
-        srv = str(data.get("server_name", "")).upper().strip()
-        if not uid.isdigit() or srv not in SERVER_ACCOUNT_FILES:
-            return jsonify({"error": "uid (digits) and valid server_name required"}), 400
-        register_auto_uid(srv, uid)
-        return jsonify({"ok": True, "server": srv, "uid": uid,
-                        "auto_targets": load_auto_targets()})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @app.get("/auto/list")
 def auto_list():
     return _jsonify({"auto_targets": load_auto_targets()})
-
-
-@app.post("/auto/run")
-def auto_run_now():
-    try:
-        api_key = (request.args.get("key") or "").strip()
-        if classify_key(api_key) != "master":
-            return jsonify({"error": "Master key required"}), 403
-        threading.Thread(target=do_auto_like_now, daemon=True).start()
-        return jsonify({"ok": True, "message": "Auto-like triggered in background"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @app.get("/cron/auto_like")
@@ -796,9 +793,408 @@ def cron_auto_like():
 
 
 # ============================================================
+#  ROUTES — MASTER PANEL APIs
+# ============================================================
+@app.get("/master/api/files")
+def master_files():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    files = []
+    for name in EDITABLE_FILES:
+        path = os.path.join(BASE_DIR, name)
+        exists = os.path.exists(path)
+        size = os.path.getsize(path) if exists else 0
+        lines = 0
+        if exists and name.endswith(".txt"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    lines = sum(1 for _ in f)
+            except Exception:
+                pass
+        files.append({"name": name, "exists": exists, "size": size, "lines": lines})
+    return _jsonify({"files": files})
+
+
+@app.get("/master/api/file")
+def master_get_file():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    name = request.args.get("name", "").strip()
+    if name not in EDITABLE_FILES:
+        return jsonify({"error": "file not allowed"}), 400
+
+    content = _read_file(name)
+    return _jsonify({"name": name, "content": content})
+
+
+@app.post("/master/api/file")
+def master_save_file():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or request.args.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    name = (data.get("name") or "").strip()
+    content = data.get("content", "")
+
+    if name not in EDITABLE_FILES:
+        return jsonify({"error": "file not allowed"}), 400
+
+    if name == "keys.json":
+        try:
+            json.loads(content)
+        except Exception as e:
+            return jsonify({"error": f"invalid JSON: {e}"}), 400
+
+    try:
+        _write_file(name, content)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return _jsonify({"ok": True, "name": name, "size": len(content)})
+
+
+@app.post("/master/api/upload")
+def master_upload():
+    key = (request.form.get("key") or request.args.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "no file uploaded"}), 400
+
+    target_name = (request.form.get("name") or f.filename or "").strip()
+    if target_name not in EDITABLE_FILES:
+        return jsonify({
+            "error": f"filename '{target_name}' not allowed",
+            "allowed": EDITABLE_FILES,
+        }), 400
+
+    try:
+        content = f.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return jsonify({"error": f"read error: {e}"}), 400
+
+    if target_name == "keys.json":
+        try:
+            json.loads(content)
+        except Exception as e:
+            return jsonify({"error": f"invalid JSON: {e}"}), 400
+
+    try:
+        _write_file(target_name, content)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return _jsonify({"ok": True, "name": target_name, "size": len(content)})
+
+
+# ============================================================
+#  AUTO UID BULK UPLOAD (auto.txt-এর জন্য)
+# ============================================================
+@app.post("/master/api/auto/bulk-upload")
+def master_auto_bulk_upload():
+    """
+    Bulk upload UIDs for auto-like targets.
+
+    Accepts:
+      1. Multipart file (name=file) → text file with UIDs (one per line)
+      2. JSON body with 'text' field containing UIDs
+      3. Query/Form params
+
+    Form/JSON fields:
+      - key:         master key (required)
+      - server_name: BD | IND | BR | US | SAC | NA (required)
+      - mode:        'replace' (default) | 'append'
+      - text:        raw text (if not using file upload)
+      - file:        file upload (multipart)
+    """
+    # Master auth
+    key = (request.form.get("key")
+           or (request.get_json(silent=True) or {}).get("key")
+           or request.args.get("key")
+           or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    # Server
+    srv = (request.form.get("server_name")
+           or (request.get_json(silent=True) or {}).get("server_name")
+           or request.args.get("server_name")
+           or "").upper().strip()
+    if srv not in SERVER_ACCOUNT_FILES:
+        return jsonify({
+            "error": "valid server_name required",
+            "allowed": list(SERVER_ACCOUNT_FILES.keys())
+        }), 400
+
+    # Mode
+    mode = (request.form.get("mode")
+            or (request.get_json(silent=True) or {}).get("mode")
+            or "replace").strip().lower()
+    if mode not in ("replace", "append"):
+        mode = "replace"
+
+    # Get raw text (file upload OR text field)
+    raw_text = ""
+    f = request.files.get("file")
+    if f:
+        try:
+            raw_text = f.read().decode("utf-8", errors="replace")
+        except Exception as e:
+            return jsonify({"error": f"file read error: {e}"}), 400
+    else:
+        data = request.get_json(silent=True) or {}
+        raw_text = str(data.get("text") or request.form.get("text") or "")
+
+    # Parse UIDs
+    uids = []
+    for chunk in raw_text.replace(",", "\n").replace(" ", "\n").replace(";", "\n").split("\n"):
+        c = chunk.strip()
+        if not c or c.startswith("#"):
+            continue
+        if c.startswith("[") and c.endswith("]"):
+            continue  # skip section headers
+        if c.isdigit():
+            uids.append(c)
+        else:
+            # extract digits from lines like "1234567890: something"
+            digits = "".join(ch for ch in c.split(":")[0] if ch.isdigit())
+            if digits:
+                uids.append(digits)
+
+    if not uids:
+        return jsonify({"error": "no valid UIDs found in input"}), 400
+
+    # Dedupe preserving order
+    uids = list(dict.fromkeys(uids))
+
+    # Apply
+    targets = load_auto_targets()
+    if mode == "replace":
+        targets[srv] = uids
+    else:  # append
+        existing = targets.get(srv, [])
+        for u in uids:
+            if u not in existing:
+                existing.append(u)
+        targets[srv] = existing
+
+    save_auto_targets(targets)
+
+    return _jsonify({
+        "ok": True,
+        "server_name": srv,
+        "mode": mode,
+        "imported": len(uids),
+        "total_for_server": len(targets[srv]),
+        "auto_targets": targets,
+    })
+
+
+# ============================================================
+#  AUTO UID — add / remove / clear
+# ============================================================
+@app.post("/master/api/auto/add")
+def master_auto_add():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    uid = str(data.get("uid", "")).strip()
+    srv = str(data.get("server_name", "")).upper().strip()
+    if not uid.isdigit() or srv not in SERVER_ACCOUNT_FILES:
+        return jsonify({"error": "uid (digits) and valid server_name required"}), 400
+
+    register_auto_uid(srv, uid)
+    return _jsonify({"ok": True, "auto_targets": load_auto_targets()})
+
+
+@app.post("/master/api/auto/remove")
+def master_auto_remove():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    uid = str(data.get("uid", "")).strip()
+    srv = str(data.get("server_name", "")).upper().strip()
+    if not uid or srv not in SERVER_ACCOUNT_FILES:
+        return jsonify({"error": "uid and valid server_name required"}), 400
+
+    targets = load_auto_targets()
+    if srv in targets and uid in targets[srv]:
+        targets[srv].remove(uid)
+        save_auto_targets(targets)
+
+    return _jsonify({"ok": True, "auto_targets": targets})
+
+
+@app.post("/master/api/auto/clear")
+def master_auto_clear():
+    """
+    Clear UIDs.
+    Body: { key, server_name: 'BD' | 'ALL' (optional) }
+    If server_name omitted → clears ALL servers.
+    """
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    srv = str(data.get("server_name", "")).upper().strip()
+
+    targets = load_auto_targets()
+
+    if not srv or srv == "ALL":
+        # clear everything
+        for s in SERVER_ACCOUNT_FILES:
+            targets[s] = []
+    elif srv in SERVER_ACCOUNT_FILES:
+        targets[srv] = []
+    else:
+        return jsonify({"error": f"invalid server_name '{srv}'"}), 400
+
+    save_auto_targets(targets)
+    return _jsonify({"ok": True, "cleared": srv or "ALL", "auto_targets": targets})
+
+
+# ============================================================
+#  KEYS
+# ============================================================
+@app.get("/master/api/keys")
+def master_get_keys():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    cfg = _read_config()
+    return _jsonify({
+        "allowed_keys": cfg.get("ALLOWED_KEYS", {}),
+        "admin_keys": cfg.get("ADMIN_KEYS", []),
+        "reset_tz": cfg.get("RESET_TZ", "Asia/Dhaka"),
+    })
+
+
+@app.post("/master/api/keys")
+def master_save_keys():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    allowed = data.get("allowed_keys", {})
+    admin = data.get("admin_keys", [])
+    tz = data.get("reset_tz", "Asia/Dhaka")
+
+    if not isinstance(allowed, dict) or not isinstance(admin, list):
+        return jsonify({"error": "invalid types"}), 400
+
+    cfg = {"ALLOWED_KEYS": allowed, "ADMIN_KEYS": admin, "RESET_TZ": tz}
+    content = json.dumps(cfg, indent=2, ensure_ascii=False)
+    try:
+        _write_file("keys.json", content)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return _jsonify({"ok": True})
+
+
+# ============================================================
+#  STATS / ACTIONS
+# ============================================================
+@app.get("/master/api/stats")
+def master_stats():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    auto_targets = load_auto_targets()
+    usage = _load_usage()
+    today = _today_str()
+
+    today_usage = {}
+    total_requests = 0
+    for k, v in usage.items():
+        if v.get("date") == today:
+            today_usage[k] = len(v.get("uids", []))
+            total_requests += len(v.get("uids", []))
+
+    file_stats = {}
+    for name in EDITABLE_FILES:
+        path = os.path.join(BASE_DIR, name)
+        if os.path.exists(path):
+            file_stats[name] = os.path.getsize(path)
+
+    jwt_status = {}
+    for srv in SERVER_ACCOUNT_FILES:
+        e = _jwt_cache.get(srv)
+        if e:
+            age = int(time.time() - e["ts"])
+            jwt_status[srv] = {
+                "tokens": len(e["tokens"]),
+                "age_seconds": age,
+                "next_refresh_in": max(0, JWT_REFRESH_HOURS * 3600 - age),
+            }
+        else:
+            jwt_status[srv] = {"tokens": 0, "age_seconds": None}
+
+    return _jsonify({
+        "today": today,
+        "auto_targets": {k: len(v) for k, v in auto_targets.items()},
+        "auto_targets_full": auto_targets,
+        "today_usage": today_usage,
+        "total_today_requests": total_requests,
+        "file_stats": file_stats,
+        "jwt_status": jwt_status,
+        "keys_count": {
+            "user": len(get_allowed_keys()),
+            "master": len(get_admin_keys()),
+        },
+    })
+
+
+@app.post("/master/api/run-auto")
+def master_run_auto():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or request.args.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+    threading.Thread(target=do_auto_like_now, daemon=True).start()
+    return _jsonify({"ok": True, "message": "auto-like triggered"})
+
+
+@app.post("/master/api/jwt-refresh")
+def master_jwt_refresh():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or request.args.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    results = {}
+    for srv in SERVER_ACCOUNT_FILES:
+        try:
+            toks = get_or_refresh_tokens(srv, force=True)
+            results[srv] = len(toks)
+        except Exception as e:
+            results[srv] = f"err: {e}"
+    return _jsonify({"ok": True, "refreshed": results})
+
+
+# ============================================================
 #  ENTRY
 # ============================================================
 if __name__ == "__main__":
     start_background_jobs()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+else:
+    try:
+        start_background_jobs()
+    except Exception as e:
+        print(f"[boot] background jobs error: {e}")
