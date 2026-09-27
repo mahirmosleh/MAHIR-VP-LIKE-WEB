@@ -1,0 +1,9 @@
+{
+  "ALLOWED_KEYS": {
+    "MAHIR-VIP-001": "user1",
+    "MAHIR-VIP-002": "user2",
+    "MAHIR-VIP-003": "user3"
+  },
+  "ADMIN_KEYS": ["OWNER-MAHIR", "ADMIN-JONI"],
+  "RESET_TZ": "Asia/Dhaka"
+}

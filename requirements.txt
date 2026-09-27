@@ -1,0 +1,7 @@
+flask
+requests
+aiohttp
+pycryptodome
+apscheduler
+pytz
+urllib3
