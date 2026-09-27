@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Master Panel — {{ brand }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{--bg:#08090c;--bg-2:#0d0f14;--surface:#111318;--surface-2:#161920;--border:#1f232d;--border-hi:#2d3340;--text:#e8eaf0;--text-dim:#8b93a7;--text-mute:#5a6273;--accent:#7c5cff;--accent-hi:#9d87ff;--success:#22c55e;--danger:#ef4444;--warning:#f59e0b;--info:#06b6d4}
+  html,body{height:100%}
+  body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .ambient{position:fixed;inset:0;pointer-events:none;z-index:0}
+  .ambient::before{content:'';position:absolute;top:-20%;left:50%;width:1200px;height:1200px;transform:translateX(-50%);background:radial-gradient(circle,rgba(245,158,11,.10) 0%,transparent 60%);filter:blur(80px)}
+  .ambient::after{content:'';position:absolute;bottom:-30%;left:-10%;width:900px;height:900px;background:radial-gradient(circle,rgba(124,92,255,.10) 0%,transparent 60%);filter:blur(80px)}
+  .grid-bg{position:fixed;inset:0;pointer-events:none;z-index:1;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse 80% 60% at 50% 40%,#000 40%,transparent 100%);-webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 40%,#000 40%,transparent 100%)}
+  .nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);background:rgba(8,9,12,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+  .nav-brand{display:flex;align-items:center;gap:10px}
+  .nav-logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;color:#fff;box-shadow:0 0 24px rgba(245,158,11,.35)}
+  .nav-title{font-weight:800;font-size:15px}
+  .nav-title span{color:var(--text-mute);font-weight:500}
+  .nav-badge{padding:4px 10px;border-radius:999px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.15));border:1px solid rgba(245,158,11,.4);color:#fbbf24;font-size:10.5px;font-weight:700;letter-spacing:.05em}
+  .nav-right{display:flex;align-items:center;gap:10px}
+  .shell{position:relative;z-index:5;max-width:1400px;margin:0 auto;padding:24px;display:grid;grid-template-columns:260px 1fr;gap:24px}
+  .login-wrap{grid-column:1 / -1;display:flex;align-items:center;justify-content:center;min-height:60vh}
+  .login-card{width:100%;max-width:400px;background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:16px;padding:32px;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+  .login-card h2{font-size:22px;font-weight:900;letter-spacing:-.02em;margin-bottom:6px}
+  .login-card p{font-size:13px;color:var(--text-dim);margin-bottom:22px}
+  .login-icon{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px;box-shadow:0 0 30px rgba(245,158,11,.4)}
+  .sidebar{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:14px;padding:16px;height:fit-content;position:sticky;top:80px}
+  .sidebar-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-mute);margin-bottom:10px;padding:0 6px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;font-size:13px;font-weight:600;color:var(--text-dim);cursor:pointer;transition:all .15s;border:1px solid transparent;margin-bottom:2px}
+  .nav-item:hover{background:var(--surface-2);color:var(--text)}
+  .nav-item.active{background:linear-gradient(90deg,rgba(124,92,255,.15),rgba(6,182,212,.05));color:var(--text);border-color:rgba(124,92,255,.25)}
+  .nav-item .ico{font-size:14px;width:18px;text-align:center}
+  .nav-item .badge{margin-left:auto;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(124,92,255,.15);color:var(--accent-hi);font-family:'JetBrains Mono',monospace}
+  .main{min-width:0}
+  .panel{display:none}
+  .panel.active{display:block;animation:fadeUp .4s cubic-bezier(.16,1,.3,1)}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .panel-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+  .panel-title{font-size:20px;font-weight:800;letter-spacing:-.02em}
+  .panel-sub{font-size:12.5px;color:var(--text-mute);margin-top:2px}
+  .card{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:16px}
+  .card-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:14px}
+  .card-title .ico{width:26px;height:26px;border-radius:7px;background:rgba(124,92,255,.12);border:1px solid rgba(124,92,255,.25);display:flex;align-items:center;justify-content:center;font-size:13px}
+  .input{width:100%;padding:11px 14px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-size:13.5px;font-family:inherit;font-weight:500;outline:none;transition:all .15s}
+  .input:hover{border-color:var(--border-hi)}
+  .input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(124,92,255,.12)}
+  .input::placeholder{color:var(--text-mute)}
+  select.input{cursor:pointer;background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;appearance:none}
+  option{background:#161920;color:#e8eaf0}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  .btn{padding:10px 16px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+  .btn:hover{background:var(--surface);border-color:var(--border-hi)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-primary{background:linear-gradient(180deg,var(--accent),#5b3fe0);border-color:transparent;color:#fff;box-shadow:0 4px 12px rgba(124,92,255,.3)}
+  .btn-primary:hover{background:linear-gradient(180deg,#8f74ff,#6b4ee6)}
+  .btn-success{background:linear-gradient(180deg,#22c55e,#16a34a);border-color:transparent;color:#fff}
+  .btn-danger{background:linear-gradient(180deg,#ef4444,#dc2626);border-color:transparent;color:#fff}
+  .btn-danger:hover{background:linear-gradient(180deg,#dc2626,#b91c1c)}
+  .btn-sm{padding:6px 11px;font-size:12px}
+  .btn-block{width:100%;justify-content:center}
+  .file-list{display:flex;flex-direction:column;gap:6px}
+  .file-item{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--border);cursor:pointer;transition:all .15s}
+  .file-item:hover{border-color:var(--border-hi);background:var(--surface-2)}
+  .file-item.active{border-color:var(--accent);background:linear-gradient(90deg,rgba(124,92,255,.1),rgba(6,182,212,.03))}
+  .file-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;background:rgba(124,92,255,.12);border:1px solid rgba(124,92,255,.2)}
+  .file-icon.json{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.25)}
+  .file-name{font-size:13px;font-weight:600}
+  .file-meta{font-size:11px;color:var(--text-mute);font-family:'JetBrains Mono',monospace}
+  .file-info{flex:1;min-width:0}
+  .editor-wrap{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--bg)}
+  .editor-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:12px;font-weight:600}
+  .editor-name{display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace}
+  .editor-actions{display:flex;gap:6px}
+  textarea.editor{width:100%;min-height:480px;padding:16px;background:var(--bg);color:var(--text);border:none;outline:none;resize:vertical;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.65;font-weight:500}
+  .upload-zone{border:2px dashed var(--border-hi);border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:rgba(124,92,255,.02)}
+  .upload-zone:hover{border-color:var(--accent);background:rgba(124,92,255,.06)}
+  .upload-zone.dragover{border-color:var(--accent);background:rgba(124,92,255,.1);transform:scale(1.01)}
+  .upload-zone .icon{font-size:38px;margin-bottom:10px}
+  .upload-zone .title{font-size:14px;font-weight:700;margin-bottom:4px}
+  .upload-zone .desc{font-size:12px;color:var(--text-mute)}
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+  .stat-card{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:12px;padding:16px}
+  .stat-card .label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-mute);margin-bottom:6px}
+  .stat-card .value{font-size:22px;font-weight:800;letter-spacing:-.03em;font-family:'JetBrains Mono',monospace}
+  .stat-card .value.accent{background:linear-gradient(135deg,#7c5cff,#06b6d4);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat-card .value.green{color:var(--success)}
+  .stat-card .value.gold{color:#fbbf24}
+  .stat-card .value.info{color:var(--info)}
+  .stat-card .value.danger{color:var(--danger)}
+  .server-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+  .server-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;align-items:center;gap:10px}
+  .server-flag{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,rgba(124,92,255,.15),rgba(6,182,212,.15));border:1px solid rgba(124,92,255,.25);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+  .server-info{flex:1;min-width:0}
+  .server-name{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace}
+  .server-count{font-size:11px;color:var(--text-mute);margin-top:1px}
+  .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-140%);padding:12px 20px;background:var(--surface);border:1px solid var(--border-hi);border-radius:10px;font-size:13px;font-weight:600;color:var(--text);z-index:9999;transition:transform .35s cubic-bezier(.16,1,.3,1);box-shadow:0 16px 40px rgba(0,0,0,.6);display:flex;align-items:center;gap:9px;max-width:90vw}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:rgba(34,197,94,.4);background:linear-gradient(180deg,rgba(34,197,94,.12),var(--surface))}
+  .toast.err{border-color:rgba(239,68,68,.4);background:linear-gradient(180deg,rgba(239,68,68,.12),var(--surface))}
+  .log{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.7;max-height:300px;overflow-y:auto;color:var(--text-dim)}
+  .log-entry{padding:2px 0}
+  .log-entry .time{color:var(--text-mute);margin-right:8px}
+  .log-entry.ok{color:var(--success)}
+  .log-entry.err{color:var(--danger)}
+  .log-entry.info{color:var(--info)}
+  .auto-tag{display:inline-flex;align-items:center;gap:6px;padding:4px 8px 4px 11px;margin:3px 3px 3px 0;border-radius:999px;background:rgba(124,92,255,.1);border:1px solid rgba(124,92,255,.25);font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--accent-hi)}
+  .auto-tag .x{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:rgba(239,68,68,.15);color:#fca5a5;cursor:pointer;font-size:11px;transition:all .15s}
+  .auto-tag .x:hover{background:rgba(239,68,68,.35);color:#fff}
+  .empty{text-align:center;padding:32px 16px;color:var(--text-mute);font-size:13px}
+  .empty .icon{font-size:40px;margin-bottom:10px;opacity:.4}
+  textarea.bulk-input{width:100%;min-height:140px;padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.6;outline:none;resize:vertical}
+  textarea.bulk-input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(124,92,255,.12)}
+  @media (max-width:900px){.shell{grid-template-columns:1fr;padding:16px}.sidebar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px}.sidebar-title{display:none}.field-row{grid-template-columns:1fr}.nav{padding:12px 16px}textarea.editor{min-height:360px;font-size:12px}}
+  @media (max-width:520px){.sidebar{grid-template-columns:1fr}.nav-title span{display:none}.panel-title{font-size:17px}.stat-card .value{font-size:18px}}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="ambient"></div>
+<div class="grid-bg"></div>
+
+<nav class="nav">
+  <div class="nav-brand">
+    <div class="nav-logo">M</div>
+    <div class="nav-title">MAHIR <span>/ Master Panel</span></div>
+    <span class="nav-badge">🔐 ADMIN</span>
+  </div>
+  <div class="nav-right">
+    <a href="/" class="btn btn-sm">👤 User View</a>
+    <button class="btn btn-sm" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="shell" id="loginShell">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-icon">🔐</div>
+      <h2>Master Access</h2>
+      <p>Enter your master API key to continue</p>
+      <div class="field">
+        <label>Master Key</label>
+        <input id="masterKey" class="input" type="password" placeholder="MAHIR-MASTER-..."/>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="doLogin()">Unlock Panel</button>
+    </div>
+  </div>
+</div>
+
+<div class="shell hidden" id="mainShell">
+  <aside class="sidebar">
+    <div class="sidebar-title">Navigation</div>
+    <div class="nav-item active" data-panel="dashboard" onclick="switchPanel('dashboard', this)">
+      <span class="ico">📊</span> Dashboard
+    </div>
+    <div class="nav-item" data-panel="files" onclick="switchPanel('files', this)">
+      <span class="ico">📁</span> File Editor
+    </div>
+    <div class="nav-item" data-panel="upload" onclick="switchPanel('upload', this)">
+      <span class="ico">⬆️</span> Upload Files
+    </div>
+    <div class="nav-item" data-panel="keys" onclick="switchPanel('keys', this)">
+      <span class="ico">🔑</span> API Keys
+    </div>
+    <div class="nav-item" data-panel="auto" onclick="switchPanel('auto', this)">
+      <span class="ico">🤖</span> Auto Targets
+      <span class="badge" id="autoCount">0</span>
+    </div>
+    <div class="nav-item" data-panel="actions" onclick="switchPanel('actions', this)">
+      <span class="ico">⚡</span> Actions
+    </div>
+    <div class="nav-item" data-panel="logs" onclick="switchPanel('logs', this)">
+      <span class="ico">📜</span> Activity Log
+    </div>
+  </aside>
+
+  <div class="main">
+    <!-- Dashboard -->
+    <div class="panel active" id="panel-dashboard">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Dashboard</div>
+          <div class="panel-sub">System overview & statistics</div>
+        </div>
+        <button class="btn" onclick="loadStats()">🔄 Refresh</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">Auto UIDs</div><div class="value accent" id="sAuto">—</div></div>
+        <div class="stat-card"><div class="label">Today's Requests</div><div class="value green" id="sReqs">—</div></div>
+        <div class="stat-card"><div class="label">User Keys</div><div class="value info" id="sUsers">—</div></div>
+        <div class="stat-card"><div class="label">Master Keys</div><div class="value gold" id="sMasters">—</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">🌍</span> Auto Targets by Server</div>
+        <div class="server-grid" id="serverGrid"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">🔑</span> JWT Token Status</div>
+        <div class="server-grid" id="jwtGrid"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">👥</span> Today's User Activity</div>
+        <div id="usageList"><div class="empty"><div class="icon">📊</div>No activity yet</div></div>
+      </div>
+    </div>
+
+    <!-- File Editor -->
+    <div class="panel" id="panel-files">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">File Editor</div>
+          <div class="panel-sub">Edit account, auto, and key files</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">📁</span> Select File</div>
+        <div class="file-list" id="fileList"></div>
+      </div>
+
+      <div class="card" id="editorCard" style="display:none;">
+        <div class="editor-wrap">
+          <div class="editor-header">
+            <div class="editor-name">
+              <span id="editorIcon">📄</span>
+              <span id="editorName">file.txt</span>
+            </div>
+            <div class="editor-actions">
+              <button class="btn btn-sm" onclick="reloadFile()">🔄 Reload</button>
+              <button class="btn btn-sm btn-primary" onclick="saveFile()">💾 Save</button>
+            </div>
+          </div>
+          <textarea class="editor" id="editorArea" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload -->
+    <div class="panel" id="panel-upload">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Upload Files</div>
+          <div class="panel-sub">Upload .txt / .json to replace server files</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="field">
+          <label>Target filename</label>
+          <select id="uploadTarget" class="input">
+            <option value="auto.txt">auto.txt</option>
+            <option value="keys.json">keys.json</option>
+            <option value="account_bd.txt">account_bd.txt</option>
+            <option value="account_ind.txt">account_ind.txt</option>
+            <option value="account_br.txt">account_br.txt</option>
+            <option value="account_us.txt">account_us.txt</option>
+            <option value="account_sac.txt">account_sac.txt</option>
+            <option value="account_na.txt">account_na.txt</option>
+          </select>
+        </div>
+
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+          <div class="icon">📤</div>
+          <div class="title">Drop file here or click to browse</div>
+          <div class="desc">Only .txt and .json allowed · will replace target file</div>
+          <input type="file" id="fileInput" style="display:none" accept=".txt,.json" onchange="uploadFile(event)"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keys -->
+    <div class="panel" id="panel-keys">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">API Keys Manager</div>
+          <div class="panel-sub">User and master key management</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn" onclick="loadKeys()">🔄 Reload</button>
+          <button class="btn btn-primary" onclick="saveKeys()">💾 Save</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">👤</span> User Keys (1 UID/day)</div>
+        <div id="userKeysList"></div>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="addUserKey()">+ Add User Key</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">👑</span> Master Keys (Unlimited)</div>
+        <div id="masterKeysList"></div>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="addMasterKey()">+ Add Master Key</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">🌐</span> Timezone</div>
+        <input id="resetTz" class="input" value="Asia/Dhaka"/>
+      </div>
+    </div>
+
+    <!-- Auto Targets -->
+    <div class="panel" id="panel-auto">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Auto Like Targets</div>
+          <div class="panel-sub">Upload / add / remove / clear UIDs for auto-like</div>
+        </div>
+        <button class="btn" onclick="loadAuto()">🔄 Refresh</button>
+      </div>
+
+      <!-- Bulk Upload -->
+      <div class="card">
+        <div class="card-title"><span class="ico">📤</span> Bulk Upload UIDs (auto.txt)</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Server</label>
+            <select id="bulkServer" class="input">
+              <option value="BD">🇧🇩 BD</option>
+              <option value="IND">🇮🇳 IND</option>
+              <option value="BR">🇧🇷 BR</option>
+              <option value="US">🇺🇸 US</option>
+              <option value="SAC">🌎 SAC</option>
+              <option value="NA">🌎 NA</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Mode</label>
+            <select id="bulkMode" class="input">
+              <option value="replace">Replace (overwrite server list)</option>
+              <option value="append">Append (add to existing)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Paste UIDs (one per line / comma / space separated)</label>
+          <textarea id="bulkText" class="bulk-input" placeholder="1234567890&#10;9876543210&#10;5555555555"></textarea>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="bulkUploadText()">📥 Upload from Text</button>
+          <button class="btn" onclick="document.getElementById('bulkFile').click()">📁 Upload from File</button>
+          <input type="file" id="bulkFile" style="display:none" accept=".txt,.csv,.json" onchange="bulkUploadFile(event)"/>
+        </div>
+      </div>
+
+      <!-- Add single -->
+      <div class="card">
+        <div class="card-title"><span class="ico">➕</span> Add Single UID</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Server</label>
+            <select id="addServer" class="input">
+              <option value="BD">BD</option>
+              <option value="IND">IND</option>
+              <option value="BR">BR</option>
+              <option value="US">US</option>
+              <option value="SAC">SAC</option>
+              <option value="NA">NA</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>UID</label>
+            <input id="addUid" class="input" placeholder="1234567890"/>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="addAuto()">+ Add to Auto</button>
+      </div>
+
+      <!-- Server panels -->
+      <div id="autoPanels"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="panel" id="panel-actions">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Actions</div>
+          <div class="panel-sub">Trigger background tasks manually</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="ico">⚡</span> Manual Triggers</div>
+        <button class="btn btn-success btn-block" onclick="runAuto()">🤖 Run Auto-Like Now</button>
+        <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="refreshJwt()">🔄 Force JWT Refresh</button>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="panel" id="panel-logs">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Activity Log</div>
+          <div class="panel-sub">Recent actions in this session</div>
+        </div>
+        <button class="btn btn-sm" onclick="clearLog()">Clear</button>
+      </div>
+
+      <div class="card">
+        <div class="log" id="logBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let MASTER_KEY = localStorage.getItem('mahir_master_key') || '';
+let CURRENT_FILE = null;
+let STATS = null;
+
+const SERVER_FLAGS = {BD:'🇧🇩',IND:'🇮🇳',BR:'🇧🇷',US:'🇺🇸',SAC:'🌎',NA:'🌎'};
+
+/* ---- LOGIN ---- */
+function doLogin() {
+  const k = document.getElementById('masterKey').value.trim();
+  if (!k) return toast('Enter master key', false);
+  MASTER_KEY = k;
+  localStorage.setItem('mahir_master_key', k);
+  verifyAndEnter();
+}
+function logout() {
+  localStorage.removeItem('mahir_master_key');
+  MASTER_KEY = '';
+  document.getElementById('mainShell').classList.add('hidden');
+  document.getElementById('loginShell').classList.remove('hidden');
+}
+async function verifyAndEnter() {
+  try {
+    const r = await fetch('/master/api/files?key=' + encodeURIComponent(MASTER_KEY));
+    if (r.status !== 200) throw new Error('Invalid master key');
+    document.getElementById('loginShell').classList.add('hidden');
+    document.getElementById('mainShell').classList.remove('hidden');
+    toast('Welcome, Master', true);
+    loadAll();
+  } catch (e) {
+    toast(e.message || 'Login failed', false);
+    localStorage.removeItem('mahir_master_key');
+    MASTER_KEY = '';
+  }
+}
+
+/* ---- PANEL NAV ---- */
+function switchPanel(name, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  if (el) el.classList.add('active');
+  if (name === 'files') loadFiles();
+  if (name === 'keys') loadKeys();
+  if (name === 'auto') loadAuto();
+  if (name === 'dashboard') loadStats();
+}
+
+/* ---- TOAST ---- */
+let toastTimer;
+function toast(msg, ok = true) {
+  const t = document.getElementById('toast');
+  t.innerHTML = (ok ? '✅ ' : '❌ ') + msg;
+  t.className = 'toast ' + (ok ? 'ok' : 'err') + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+/* ---- LOG ---- */
+function logMsg(msg, type = 'info') {
+  const box = document.getElementById('logBox');
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + type;
+  div.innerHTML = `<span class="time">${time}</span>${escapeHtml(msg)}`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('logBox').innerHTML = '';
+  toast('Log cleared', true);
+}
+
+/* ---- API ---- */
+async function api(path, opts = {}) {
+  const sep = path.includes('?') ? '&' : '?';
+  const url = path + sep + 'key=' + encodeURIComponent(MASTER_KEY);
+  const r = await fetch(url, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+
+/* ---- LOAD ALL ---- */
+async function loadAll() {
+  loadStats();
+  loadFiles();
+  loadAuto();
+  logMsg('Master panel loaded', 'ok');
+}
+
+/* ---- STATS ---- */
+async function loadStats() {
+  try {
+    const data = await api('/master/api/stats');
+    STATS = data;
+    const totalAuto = Object.values(data.auto_targets).reduce((a,b)=>a+b, 0);
+    document.getElementById('sAuto').textContent = totalAuto;
+    document.getElementById('sReqs').textContent = data.total_today_requests;
+    document.getElementById('sUsers').textContent = data.keys_count.user;
+    document.getElementById('sMasters').textContent = data.keys_count.master;
+    document.getElementById('autoCount').textContent = totalAuto;
+
+    document.getElementById('serverGrid').innerHTML = Object.keys(SERVER_FLAGS).map(srv => `
+      <div class="server-card">
+        <div class="server-flag">${SERVER_FLAGS[srv]}</div>
+        <div class="server-info">
+          <div class="server-name">${srv}</div>
+          <div class="server-count">${data.auto_targets[srv] || 0} auto UIDs</div>
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('jwtGrid').innerHTML = Object.entries(data.jwt_status).map(([srv, s]) => {
+      let status = 'No cache', cls = 'danger';
+      if (s.tokens > 0) {
+        const h = Math.floor(s.age_seconds / 3600);
+        const m = Math.floor((s.age_seconds % 3600) / 60);
+        status = `${s.tokens} tokens · ${h}h ${m}m ago`;
+        cls = 'green';
+      }
+      return `
+        <div class="server-card">
+          <div class="server-flag">${SERVER_FLAGS[srv]}</div>
+          <div class="server-info">
+            <div class="server-name">${srv}</div>
+            <div class="server-count" style="color:var(--${cls})">${status}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const usage = data.today_usage || {};
+    const keys = Object.keys(usage);
+    document.getElementById('usageList').innerHTML = keys.length === 0
+      ? '<div class="empty"><div class="icon">📊</div>No activity yet today</div>'
+      : keys.map(k => `
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <span style="font-family:'JetBrains Mono',monospace;color:var(--accent-hi)">${escapeHtml(k)}</span>
+          <span style="color:var(--success);font-weight:700">${usage[k]} UID${usage[k]>1?'s':''}</span>
+        </div>
+      `).join('');
+  } catch (e) {
+    toast('Stats load failed: ' + e.message, false);
+  }
+}
+
+/* ---- FILES ---- */
+async function loadFiles() {
+  try {
+    const data = await api('/master/api/files');
+    document.getElementById('fileList').innerHTML = data.files.map(f => `
+      <div class="file-item" onclick="openFile('${f.name}')">
+        <div class="file-icon ${f.name.endsWith('.json')?'json':''}">
+          ${f.name.endsWith('.json')?'⚙️':'📄'}
+        </div>
+        <div class="file-info">
+          <div class="file-name">${f.name}</div>
+          <div class="file-meta">${f.exists ? (f.size + ' bytes · ' + f.lines + ' lines') : 'missing'}</div>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    toast('Files load failed', false);
+  }
+}
+async function openFile(name) {
+  try {
+    const data = await api('/master/api/file?name=' + encodeURIComponent(name));
+    CURRENT_FILE = name;
+    document.getElementById('editorName').textContent = name;
+    document.getElementById('editorIcon').textContent = name.endsWith('.json') ? '⚙️' : '📄';
+    document.getElementById('editorArea').value = data.content || '';
+    document.getElementById('editorCard').style.display = 'block';
+    document.querySelectorAll('.file-item').forEach(f => {
+      if (f.textContent.includes(name)) f.classList.add('active');
+      else f.classList.remove('active');
+    });
+    logMsg('Opened file: ' + name, 'info');
+  } catch (e) {
+    toast('Open failed: ' + e.message, false);
+  }
+}
+async function reloadFile() {
+  if (!CURRENT_FILE) return;
+  await openFile(CURRENT_FILE);
+  toast('Reloaded', true);
+}
+async function saveFile() {
+  if (!CURRENT_FILE) return toast('No file selected', false);
+  const content = document.getElementById('editorArea').value;
+  try {
+    await api('/master/api/file', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY, name: CURRENT_FILE, content })
+    });
+    toast('Saved: ' + CURRENT_FILE, true);
+    logMsg('Saved file: ' + CURRENT_FILE, 'ok');
+    if (CURRENT_FILE === 'auto.txt') loadAuto();
+  } catch (e) {
+    toast('Save failed: ' + e.message, false);
+    logMsg('Save failed: ' + e.message, 'err');
+  }
+}
+
+/* ---- UPLOAD ---- */
+const zone = document.getElementById('uploadZone');
+['dragenter', 'dragover'].forEach(ev => {
+  zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('dragover'); });
+});
+['dragleave', 'drop'].forEach(ev => {
+  zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove('dragover'); });
+});
+zone.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) doUpload(f);
+});
+async function uploadFile(event) {
+  const f = event.target.files[0];
+  if (!f) return;
+  doUpload(f);
+}
+async function doUpload(file) {
+  const target = document.getElementById('uploadTarget').value;
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  fd.append('name', target);
+  fd.append('key', MASTER_KEY);
+  try {
+    const r = await fetch('/master/api/upload', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Upload failed');
+    toast('Uploaded ' + target + ' (' + data.size + ' bytes)', true);
+    logMsg('Uploaded ' + target, 'ok');
+    document.getElementById('fileInput').value = '';
+    if (target === 'auto.txt') loadAuto();
+    if (target === 'keys.json') loadKeys();
+    loadFiles();
+  } catch (e) {
+    toast('Upload failed: ' + e.message, false);
+  }
+}
+
+/* ---- KEYS ---- */
+async function loadKeys() {
+  try {
+    const data = await api('/master/api/keys');
+    const uk = Object.entries(data.allowed_keys || {});
+    document.getElementById('userKeysList').innerHTML = uk.length === 0
+      ? '<div class="empty">No user keys</div>'
+      : uk.map(([k, v]) => `
+        <div class="field-row" style="margin-bottom:6px">
+          <input class="input user-key" value="${escapeHtml(k)}"/>
+          <input class="input user-name" value="${escapeHtml(v)}"/>
+          <button class="btn btn-sm btn-danger" onclick="this.parentNode.remove()">✕</button>
+        </div>
+      `).join('');
+
+    const mk = data.admin_keys || [];
+    document.getElementById('masterKeysList').innerHTML = mk.length === 0
+      ? '<div class="empty">No master keys</div>'
+      : mk.map(k => `
+        <div class="field-row" style="margin-bottom:6px">
+          <input class="input master-key" value="${escapeHtml(k)}"/>
+          <button class="btn btn-sm btn-danger" onclick="this.parentNode.remove()">✕</button>
+        </div>
+      `).join('');
+    document.getElementById('resetTz').value = data.reset_tz || 'Asia/Dhaka';
+  } catch (e) {
+    toast('Keys load failed: ' + e.message, false);
+  }
+}
+function addUserKey() {
+  const div = document.createElement('div');
+  div.className = 'field-row';
+  div.style.marginBottom = '6px';
+  div.innerHTML = `
+    <input class="input user-key" placeholder="MAHIR-USER-XXX"/>
+    <input class="input user-name" placeholder="username"/>
+    <button class="btn btn-sm btn-danger" onclick="this.parentNode.remove()">✕</button>
+  `;
+  document.getElementById('userKeysList').appendChild(div);
+}
+function addMasterKey() {
+  const div = document.createElement('div');
+  div.className = 'field-row';
+  div.style.marginBottom = '6px';
+  div.innerHTML = `
+    <input class="input master-key" placeholder="MAHIR-MASTER-XXX"/>
+    <button class="btn btn-sm btn-danger" onclick="this.parentNode.remove()">✕</button>
+  `;
+  document.getElementById('masterKeysList').appendChild(div);
+}
+async function saveKeys() {
+  const userKeys = {};
+  document.querySelectorAll('#userKeysList .user-key').forEach((el, i) => {
+    const k = el.value.trim();
+    const n = document.querySelectorAll('#userKeysList .user-name')[i]?.value.trim() || k;
+    if (k) userKeys[k] = n;
+  });
+  const masterKeys = [];
+  document.querySelectorAll('#masterKeysList .master-key').forEach(el => {
+    const k = el.value.trim();
+    if (k) masterKeys.push(k);
+  });
+  const resetTz = document.getElementById('resetTz').value.trim() || 'Asia/Dhaka';
+  try {
+    await api('/master/api/keys', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY, allowed_keys: userKeys, admin_keys: masterKeys, reset_tz: resetTz })
+    });
+    toast('Keys saved', true);
+    logMsg(`Keys saved (${Object.keys(userKeys).length} user, ${masterKeys.length} master)`, 'ok');
+  } catch (e) {
+    toast('Save failed: ' + e.message, false);
+  }
+}
+
+/* ---- AUTO ---- */
+async function loadAuto() {
+  try {
+    const data = await api('/master/api/stats');
+    const targets = data.auto_targets_full || {};
+    document.getElementById('autoPanels').innerHTML = Object.keys(SERVER_FLAGS).map(srv => {
+      const uids = targets[srv] || [];
+      return `
+        <div class="card">
+          <div class="card-title" style="justify-content:space-between">
+            <span style="display:flex;align-items:center;gap:8px">
+              <span class="ico">${SERVER_FLAGS[srv]}</span>
+              ${srv} — ${uids.length} UIDs
+            </span>
+            ${uids.length > 0 ? `
+              <button class="btn btn-sm btn-danger" onclick="clearServerAuto('${srv}')">🗑️ Clear ${srv}</button>
+            ` : ''}
+          </div>
+          <div style="padding:6px 0">
+            ${uids.length === 0
+              ? '<div class="empty" style="padding:12px">No targets</div>'
+              : uids.map(u => `
+                <span class="auto-tag">
+                  ${u}
+                  <span class="x" onclick="removeAuto('${srv}','${u}')" title="Remove">✕</span>
+                </span>
+              `).join('')
+            }
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const total = Object.values(data.auto_targets).reduce((a,b)=>a+b, 0);
+    document.getElementById('autoCount').textContent = total;
+  } catch (e) {
+    toast('Auto load failed: ' + e.message, false);
+  }
+}
+
+async function bulkUploadText() {
+  const srv = document.getElementById('bulkServer').value;
+  const mode = document.getElementById('bulkMode').value;
+  const text = document.getElementById('bulkText').value.trim();
+  if (!text) return toast('Paste UIDs first', false);
+
+  try {
+    const r = await api('/master/api/auto/bulk-upload', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY, server_name: srv, mode, text })
+    });
+    toast(`Imported ${r.imported} UIDs to ${srv} (${mode})`, true);
+    logMsg(`Bulk upload: ${r.imported} UIDs → ${srv} (${mode})`, 'ok');
+    document.getElementById('bulkText').value = '';
+    loadAuto();
+  } catch (e) {
+    toast('Bulk upload failed: ' + e.message, false);
+    logMsg('Bulk upload failed: ' + e.message, 'err');
+  }
+}
+
+async function bulkUploadFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const srv = document.getElementById('bulkServer').value;
+  const mode = document.getElementById('bulkMode').value;
+
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  fd.append('key', MASTER_KEY);
+  fd.append('server_name', srv);
+  fd.append('mode', mode);
+
+  try {
+    const r = await fetch('/master/api/auto/bulk-upload', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Upload failed');
+    toast(`Imported ${data.imported} UIDs to ${srv} (${mode})`, true);
+    logMsg(`Bulk file upload: ${data.imported} UIDs → ${srv} (${mode})`, 'ok');
+    document.getElementById('bulkFile').value = '';
+    loadAuto();
+  } catch (e) {
+    toast('File upload failed: ' + e.message, false);
+    logMsg('File upload failed: ' + e.message, 'err');
+  }
+}
+
+async function addAuto() {
+  const uid = document.getElementById('addUid').value.trim();
+  const srv = document.getElementById('addServer').value;
+  if (!uid || !/^\d+$/.test(uid)) return toast('Invalid UID', false);
+  try {
+    await api('/master/api/auto/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY, uid, server_name: srv })
+    });
+    toast('Added ' + uid + ' to ' + srv, true);
+    logMsg('Added auto UID: ' + srv + '/' + uid, 'ok');
+    document.getElementById('addUid').value = '';
+    loadAuto();
+  } catch (e) {
+    toast('Add failed: ' + e.message, false);
+  }
+}
+
+async function removeAuto(srv, uid) {
+  if (!confirm(`Remove ${uid} from ${srv}?`)) return;
+  try {
+    await api('/master/api/auto/remove', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY, uid, server_name: srv })
+    });
+    toast('Removed ' + uid, true);
+    logMsg('Removed auto UID: ' + srv + '/' + uid, 'info');
+    loadAuto();
+  } catch (e) {
+    toast('Remove failed: ' + e.message, false);
+  }
+}
+
+async function clearServerAuto(srv) {
+  if (!confirm(`Clear ALL UIDs from ${srv}? This cannot be undone.`)) return;
+  try {
+    await api('/master/api/auto/clear', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY, server_name: srv })
+    });
+    toast('Cleared ' + srv, true);
+    logMsg('Cleared all UIDs from ' + srv, 'info');
+    loadAuto();
+  } catch (e) {
+    toast('Clear failed: ' + e.message, false);
+  }
+}
+
+/* ---- ACTIONS ---- */
+async function runAuto() {
+  if (!confirm('Run auto-like now?')) return;
+  try {
+    await api('/master/api/run-auto', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY })
+    });
+    toast('Auto-like triggered in background', true);
+    logMsg('Manual auto-like triggered', 'ok');
+  } catch (e) {
+    toast('Failed: ' + e.message, false);
+  }
+}
+
+async function refreshJwt() {
+  if (!confirm('Force JWT refresh for all servers?')) return;
+  try {
+    const data = await api('/master/api/jwt-refresh', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY })
+    });
+    toast('JWT refresh complete', true);
+    logMsg('JWT refreshed: ' + JSON.stringify(data.refreshed), 'ok');
+    loadStats();
+  } catch (e) {
+    toast('Failed: ' + e.message, false);
+  }
+}
+
+/* ---- UTILS ---- */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+/* ---- BOOT ---- */
+document.getElementById('masterKey').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+if (MASTER_KEY) verifyAndEnter();
+</script>
+</body>
+</html>
