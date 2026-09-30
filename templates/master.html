@@ -147,6 +147,20 @@
   .info-item .val{font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;word-break:break-all}
   .activity-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
   .json-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;max-height:280px;overflow:auto;white-space:pre-wrap;color:var(--text-dim);margin-top:12px}
+  .mini-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:6px 0}
+  .mini-card{background:#0a0a0c;border:1px solid #1a1a22;border-radius:12px;overflow:hidden;cursor:pointer;transition:all .15s;position:relative}
+  .mini-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .mini-card.mini-loading{padding:20px;text-align:center;color:var(--text-mute);font-size:12px}
+  .mini-banner{height:48px;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)}
+  .mini-body{display:flex;align-items:flex-start;gap:10px;padding:8px 12px 12px;margin-top:-20px;position:relative}
+  .mini-avatar{width:48px;height:48px;border-radius:10px;border:2px solid #0a0a0c;object-fit:cover;background:#1a1a22;flex-shrink:0}
+  .mini-av-fallback{display:flex;align-items:center;justify-content:center;font-size:20px}
+  .mini-meta{flex:1;min-width:0;padding-top:18px}
+  .mini-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mini-uid{font-size:11px;color:var(--text-mute);font-family:'JetBrains Mono',monospace}
+  .mini-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+  .mini-chips span{padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text-dim)}
+  .mini-x{position:absolute;top:8px;right:8px;z-index:2}
   @media (max-width:900px){.shell{grid-template-columns:1fr;padding:16px}.sidebar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px}.sidebar-title{display:none}.field-row{grid-template-columns:1fr}.nav{padding:12px 16px}textarea.editor{min-height:360px;font-size:12px}.info-grid{grid-template-columns:1fr}}
   @media (max-width:520px){.sidebar{grid-template-columns:1fr}.nav-title span{display:none}.panel-title{font-size:17px}.stat-card .value{font-size:18px}}
   .hidden{display:none !important}
@@ -173,10 +187,10 @@
     <div class="login-card">
       <div class="login-icon">🔐</div>
       <h2>Master Access</h2>
-      <p>Password: <code style="color:#fbbf24">FUCK-YOU</code></p>
+      <p>Enter master password to unlock the panel</p>
       <div class="field">
         <label>Master Password</label>
-        <input id="masterKey" class="input" type="password" placeholder="OWNER-MAHIR" autocomplete="current-password"/>
+        <input id="masterKey" class="input" type="password" placeholder="••••••••••••" autocomplete="current-password"/>
       </div>
       <button class="btn btn-primary btn-block" onclick="doLogin()">Unlock Panel</button>
     </div>
@@ -506,7 +520,7 @@ function logout() {
 async function verifyAndEnter() {
   try {
     const r = await fetch('/master/api/files?key=' + encodeURIComponent(MASTER_KEY));
-    if (r.status !== 200) throw new Error('Invalid password (use OWNER-MAHIR)');
+    if (r.status !== 200) throw new Error('Invalid master password');
     document.getElementById('loginShell').classList.add('hidden');
     document.getElementById('mainShell').classList.remove('hidden');
     toast('Welcome, Master', true);
@@ -970,11 +984,52 @@ async function saveKeys() {
 }
 
 /* ---- AUTO ---- */
+const playerCache = {};
+
+async function fetchPlayerCard(uid) {
+  if (playerCache[uid]) return playerCache[uid];
+  try {
+    const data = await api('/master/api/player-info?uid=' + encodeURIComponent(uid));
+    playerCache[uid] = data;
+    return data;
+  } catch (e) {
+    return { uid, nickname: 'Unknown', level: 0, likes: 0, clanName: '', headPic: null, region: '' };
+  }
+}
+
+function renderMiniCard(p, srv) {
+  const avatarUrl = p.headPic
+    ? `https://dl.cdn.freefiremobile.com/common/Items/Icon/${p.headPic}.png`
+    : '';
+  return `
+    <div class="mini-card" onclick="openPlayerInfo('${p.uid}')">
+      <div class="mini-banner"></div>
+      <div class="mini-body">
+        ${avatarUrl
+          ? `<img class="mini-avatar" src="${avatarUrl}" onerror="this.outerHTML='<div class=\\'mini-avatar mini-av-fallback\\'>👤</div>'"/>`
+          : `<div class="mini-avatar mini-av-fallback">👤</div>`
+        }
+        <div class="mini-meta">
+          <div class="mini-name">${escapeHtml(p.nickname || 'Unknown')}</div>
+          <div class="mini-uid">${escapeHtml(String(p.uid))}</div>
+          <div class="mini-chips">
+            <span>Lvl ${p.level ?? '—'}</span>
+            <span>❤ ${p.likes ?? 0}</span>
+            ${p.clanName ? `<span>${escapeHtml(p.clanName)}</span>` : ''}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-danger mini-x" onclick="event.stopPropagation();removeAuto('${srv}','${p.uid}')">✕</button>
+      </div>
+    </div>
+  `;
+}
+
 async function loadAuto() {
   try {
     const data = await api('/master/api/stats');
     const targets = data.auto_targets_full || {};
-    document.getElementById('autoPanels').innerHTML = Object.keys(SERVER_FLAGS).map(srv => {
+    const panels = document.getElementById('autoPanels');
+    panels.innerHTML = Object.keys(SERVER_FLAGS).map(srv => {
       const uids = targets[srv] || [];
       return `
         <div class="card">
@@ -987,20 +1042,26 @@ async function loadAuto() {
               <button class="btn btn-sm btn-danger" onclick="clearServerAuto('${srv}')">🗑️ Clear ${srv}</button>
             ` : ''}
           </div>
-          <div style="padding:6px 0">
+          <div class="mini-grid" id="autoGrid-${srv}">
             ${uids.length === 0
               ? '<div class="empty" style="padding:12px">No targets</div>'
-              : uids.map(u => `
-                <span class="auto-tag">
-                  <span onclick="openPlayerInfo('${u}')">${u}</span>
-                  <span class="x" onclick="removeAuto('${srv}','${u}')" title="Remove">✕</span>
-                </span>
-              `).join('')
+              : uids.map(u => `<div class="mini-card mini-loading" data-uid="${u}" data-srv="${srv}">Loading ${u}…</div>`).join('')
             }
           </div>
         </div>
       `;
     }).join('');
+
+    // Load player cards in parallel (batched)
+    for (const srv of Object.keys(SERVER_FLAGS)) {
+      const uids = targets[srv] || [];
+      if (!uids.length) continue;
+      const results = await Promise.all(uids.map(u => fetchPlayerCard(u)));
+      const grid = document.getElementById('autoGrid-' + srv);
+      if (grid) {
+        grid.innerHTML = results.map(p => renderMiniCard(p, srv)).join('');
+      }
+    }
 
     const total = Object.values(data.auto_targets || {}).reduce((a,b)=>a+b, 0);
     document.getElementById('autoCount').textContent = total;
@@ -1065,7 +1126,9 @@ async function addAuto() {
     toast('Added ' + uid + ' to ' + srv, true);
     logMsg('Added auto UID: ' + srv + '/' + uid, 'ok');
     document.getElementById('addUid').value = '';
-    loadAuto();
+    delete playerCache[uid];
+    await loadAuto();
+    openPlayerInfo(uid);  // show avatar + banner card after add
   } catch (e) {
     toast('Add failed: ' + e.message, false);
   }
