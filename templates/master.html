@@ -161,6 +161,9 @@
   .mini-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
   .mini-chips span{padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text-dim)}
   .mini-x{position:absolute;top:8px;right:8px;z-index:2}
+  .copy-btn{padding:2px 6px !important;font-size:11px !important;min-width:auto;opacity:.7}
+  .copy-btn:hover{opacity:1}
+  .info-item .lbl{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
   @media (max-width:900px){.shell{grid-template-columns:1fr;padding:16px}.sidebar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px}.sidebar-title{display:none}.field-row{grid-template-columns:1fr}.nav{padding:12px 16px}textarea.editor{min-height:360px;font-size:12px}.info-grid{grid-template-columns:1fr}}
   @media (max-width:520px){.sidebar{grid-template-columns:1fr}.nav-title span{display:none}.panel-title{font-size:17px}.stat-card .value{font-size:18px}}
   .hidden{display:none !important}
@@ -501,7 +504,19 @@ let MASTER_KEY = localStorage.getItem('mahir_master_key') || '';
 let CURRENT_FILE = null;
 let STATS = null;
 const SERVER_FLAGS = {BD:'🇧🇩',IND:'🇮🇳',BR:'🇧🇷',US:'🇺🇸',SAC:'🌎',NA:'🌎'};
-const AVATAR_CDN = 'https://dl.cdn.freefiremobile.com/common/Items/Icon/'; // fallback; headPic may need different CDN
+const AVATAR_CDN = 'https://iconapi.wasmer.app/';
+function avatarSrc(headPic) {
+  if (!headPic) return '';
+  return AVATAR_CDN + headPic;
+}
+function copyText(text, label) {
+  if (!text) return toast('Nothing to copy', false);
+  navigator.clipboard.writeText(String(text)).then(() => toast((label || 'Copied') + ': ' + text, true)).catch(() => toast('Copy failed', false));
+}
+function copyBtn(val, label) {
+  if (val === undefined || val === null || val === '') return '';
+  return `<button class="btn btn-sm copy-btn" onclick="event.stopPropagation();copyText('${String(val).replace(/'/g,"\\'")}','${label || 'Copied'}')" title="Copy">📋</button>`;
+}
 
 /* ---- LOGIN ---- */
 function doLogin() {
@@ -737,11 +752,7 @@ async function openPlayerInfo(uid) {
   document.getElementById('playerModalBody').innerHTML = '<div class="empty">Loading player…</div>';
   try {
     const data = await api('/master/api/player-info?uid=' + encodeURIComponent(uid));
-    const headPic = data.headPic;
-    // Common FF item CDN patterns — try headPic as avatar
-    const avatarUrl = headPic
-      ? `https://dl.cdn.freefiremobile.com/common/Items/Icon/${headPic}.png`
-      : '';
+    const avatarUrl = data.avatarUrl || avatarSrc(data.headPic);
 
     const activity = (data.today_like_activity || []).map(a => `
       <div class="activity-row">
@@ -750,23 +761,46 @@ async function openPlayerInfo(uid) {
       </div>
     `).join('') || '<div class="empty" style="padding:12px">No likes sent today</div>';
 
+    const duo = data.duo;
+    let duoHtml = '';
+    if (duo && duo.partner_uid) {
+      duoHtml = `
+        <div style="margin-top:14px">
+          <div class="card-title" style="margin-bottom:8px"><span class="ico">🤝</span> Dynamic Duo</div>
+          <div class="info-grid">
+            <div class="info-item"><div class="lbl">Partner UID ${copyBtn(duo.partner_uid,'Partner UID')}</div><div class="val">${escapeHtml(String(duo.partner_uid))}</div></div>
+            <div class="info-item"><div class="lbl">Duo Level</div><div class="val">${duo.duo_level ?? '—'}</div></div>
+            <div class="info-item"><div class="lbl">Duo Score</div><div class="val">${duo.duo_score ?? '—'}</div></div>
+            <div class="info-item"><div class="lbl">Status</div><div class="val">${escapeHtml(duo.status || '—')}</div></div>
+          </div>
+        </div>`;
+    } else if (duo) {
+      duoHtml = `<div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--text-mute)">🤝 No Dynamic Duo found</div>`;
+    }
+
+    const clanLabel = data.clanName
+      ? `${escapeHtml(data.clanName)}${data.clanId ? ' · ' + escapeHtml(String(data.clanId)) : ''}`
+      : '—';
+
     document.getElementById('playerModalBody').innerHTML = `
       <div class="player-card">
         <div class="player-banner"></div>
         <div class="player-avatar-wrap">
           ${avatarUrl
-            ? `<img class="player-avatar" src="${avatarUrl}" onerror="this.style.display='none'"/>`
-            : `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:28px">👤</div>`
+            ? `<img class="player-avatar" src="${avatarUrl}" onerror="this.outerHTML='<div class=\\'player-avatar\\' style=\\'display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a1a22\\'>👤</div>'"/>`
+            : `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a1a22">👤</div>`
           }
         </div>
         <div class="player-info">
-          <div class="player-name">${escapeHtml(data.nickname || 'Unknown')}</div>
-          <div style="font-size:12px;color:var(--text-mute);font-family:'JetBrains Mono',monospace">${escapeHtml(String(data.uid))}</div>
+          <div class="player-name">${escapeHtml(data.nickname || 'Unknown')} ${copyBtn(data.nickname,'Name')}</div>
+          <div style="font-size:12px;color:var(--text-mute);font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:6px">
+            ${escapeHtml(String(data.uid))} ${copyBtn(data.uid,'UID')}
+          </div>
           <div class="player-meta">
             <span class="player-chip gold">Lvl ${data.level ?? '—'}</span>
             <span class="player-chip green">❤ ${data.likes ?? 0}</span>
             <span class="player-chip purple">${escapeHtml(data.region || '—')}</span>
-            ${data.clanName ? `<span class="player-chip">${escapeHtml(data.clanName)}</span>` : ''}
+            ${data.clanName ? `<span class="player-chip">${escapeHtml(data.clanName)}${data.clanId ? ' · ' + data.clanId : ''}</span>` : ''}
             ${data.is_blocked ? `<span class="player-chip red">BLOCKED</span>` : ''}
           </div>
         </div>
@@ -775,15 +809,21 @@ async function openPlayerInfo(uid) {
       <div class="info-grid">
         <div class="info-item"><div class="lbl">BR Rank</div><div class="val">${data.rank ?? '—'}</div></div>
         <div class="info-item"><div class="lbl">CS Rank</div><div class="val">${data.csRank ?? '—'}</div></div>
+        <div class="info-item"><div class="lbl">Guild Name ${copyBtn(data.clanName,'Guild')}</div><div class="val">${escapeHtml(data.clanName || '—')}</div></div>
+        <div class="info-item"><div class="lbl">Guild UID ${copyBtn(data.clanId,'Guild UID')}</div><div class="val">${escapeHtml(String(data.clanId || '—'))}</div></div>
+        <div class="info-item"><div class="lbl">Guild Leader ${copyBtn(data.clanLeaderName,'Leader')}</div><div class="val">${escapeHtml(data.clanLeaderName || '—')}</div></div>
+        <div class="info-item"><div class="lbl">Leader UID ${copyBtn(data.clanLeaderUid,'Leader UID')}</div><div class="val">${escapeHtml(String(data.clanLeaderUid || '—'))}</div></div>
         <div class="info-item"><div class="lbl">Clan Level</div><div class="val">${data.clanLevel ?? '—'}</div></div>
-        <div class="info-item"><div class="lbl">Pet</div><div class="val">${escapeHtml(data.petName || '—')}</div></div>
+        <div class="info-item"><div class="lbl">Credit</div><div class="val">${data.creditScore ?? '—'}</div></div>
         <div class="info-item"><div class="lbl">Last Login</div><div class="val">${escapeHtml(data.lastLogin || '—')}</div></div>
         <div class="info-item"><div class="lbl">Account Age</div><div class="val">${escapeHtml(data.accountAge || '—')}</div></div>
         <div class="info-item"><div class="lbl">Created</div><div class="val">${escapeHtml(data.created || '—')}</div></div>
-        <div class="info-item"><div class="lbl">Credit</div><div class="val">${data.creditScore ?? '—'}</div></div>
+        <div class="info-item"><div class="lbl">HeadPic ID ${copyBtn(data.headPic,'Avatar ID')}</div><div class="val">${data.headPic ?? '—'}</div></div>
       </div>
 
       ${data.signature ? `<div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--text-dim)">${escapeHtml(data.signature)}</div>` : ''}
+
+      ${duoHtml}
 
       <div style="margin-top:16px">
         <div class="card-title" style="margin-bottom:8px"><span class="ico">📈</span> Today's Like Activity</div>
@@ -796,8 +836,9 @@ async function openPlayerInfo(uid) {
           : `<button class="btn btn-danger" onclick="doBlockUid('${data.uid}');closePlayerModal()">🚫 Block</button>`
         }
         <button class="btn" onclick="toggleFullJson()">📄 Full JSON</button>
+        <button class="btn" onclick="copyText('${data.uid}','UID')">📋 Copy UID</button>
       </div>
-      <div class="json-box hidden" id="fullJsonBox">${escapeHtml(JSON.stringify(data.full || data, null, 2))}</div>
+      <div class="json-box hidden" id="fullJsonBox">${escapeHtml(JSON.stringify({...data, full: data.full}, null, 2))}</div>
     `;
   } catch (e) {
     document.getElementById('playerModalBody').innerHTML = `<div class="empty" style="color:var(--danger)">Failed: ${escapeHtml(e.message)}</div>`;
@@ -998,8 +1039,9 @@ async function fetchPlayerCard(uid) {
 }
 
 function renderMiniCard(p, srv) {
-  const avatarUrl = p.headPic
-    ? `https://dl.cdn.freefiremobile.com/common/Items/Icon/${p.headPic}.png`
+  const avatarUrl = p.avatarUrl || avatarSrc(p.headPic);
+  const guildText = p.clanName
+    ? (p.clanId ? `${p.clanName} · ${p.clanId}` : p.clanName)
     : '';
   return `
     <div class="mini-card" onclick="openPlayerInfo('${p.uid}')">
@@ -1011,11 +1053,11 @@ function renderMiniCard(p, srv) {
         }
         <div class="mini-meta">
           <div class="mini-name">${escapeHtml(p.nickname || 'Unknown')}</div>
-          <div class="mini-uid">${escapeHtml(String(p.uid))}</div>
+          <div class="mini-uid">${escapeHtml(String(p.uid))} ${copyBtn(p.uid,'UID')}</div>
           <div class="mini-chips">
             <span>Lvl ${p.level ?? '—'}</span>
             <span>❤ ${p.likes ?? 0}</span>
-            ${p.clanName ? `<span>${escapeHtml(p.clanName)}</span>` : ''}
+            ${guildText ? `<span>${escapeHtml(guildText)}</span>` : ''}
           </div>
         </div>
         <button class="btn btn-sm btn-danger mini-x" onclick="event.stopPropagation();removeAuto('${srv}','${p.uid}')">✕</button>
