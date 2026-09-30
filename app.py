@@ -2,7 +2,7 @@
 # ==========================================================
 #  Web:
 #    /              → User UI
-#    /master        → Master Admin Panel
+#    /master        → Master Admin Panel (password: OWNER-MAHIR)
 #
 #  Public APIs:
 #    /mahir&like?uid={uid}&key={key}                    ← SHORT (default BD)
@@ -12,20 +12,25 @@
 #    /auto/list
 #    /cron/auto_like?secret={secret}
 #
-#  Master APIs (key required):
+#  Master APIs (password: OWNER-MAHIR):
 #    GET    /master/api/files
 #    GET    /master/api/file?name=auto.txt
 #    POST   /master/api/file
-#    POST   /master/api/upload            (single file)
-#    POST   /master/api/auto/bulk-upload  (bulk UID upload)
+#    POST   /master/api/upload
+#    POST   /master/api/auto/bulk-upload
 #    POST   /master/api/auto/add
 #    POST   /master/api/auto/remove
-#    POST   /master/api/auto/clear        (clear all UIDs for a server)
+#    POST   /master/api/auto/clear
 #    GET    /master/api/keys
 #    POST   /master/api/keys
 #    GET    /master/api/stats
 #    POST   /master/api/run-auto
 #    POST   /master/api/jwt-refresh
+#    GET    /master/api/usage-detail
+#    GET    /master/api/blocked
+#    POST   /master/api/block
+#    POST   /master/api/unblock
+#    GET    /master/api/player-info?uid=
 # ==========================================================
 
 import os
@@ -93,6 +98,9 @@ AUTO_LIKE_HOUR    = 4
 AUTO_LIKE_MINUTE  = 10
 DAILY_LIMIT_USER  = 1
 
+# Master panel password — ONLY this
+MASTER_PASSWORD = "OWNER-MAHIR"
+
 SERVER_ACCOUNT_FILES = {
     "BD":  "account_bd.txt",
     "IND": "account_ind.txt",
@@ -116,6 +124,8 @@ EDITABLE_FILES = [
 CONFIG_RO_PATH = os.path.join(BASE_DIR, "keys.json")
 CONFIG_RW_PATH = os.path.join("/tmp", "keys.json")
 USAGE_PATH     = os.path.join("/tmp", "mahir_usage.json")
+USAGE_DETAIL_PATH = os.path.join("/tmp", "mahir_usage_detail.json")
+BLOCKED_UIDS_PATH = os.path.join("/tmp", "mahir_blocked_uids.json")
 AUTO_FILE      = os.path.join(BASE_DIR, "auto.txt")
 
 config_lock = RLock()
@@ -188,7 +198,7 @@ def _reset_at_str():
 
 
 # ============================================================
-#  USAGE / QUOTA
+#  USAGE / QUOTA (simple daily 1-UID limit for user keys)
 # ============================================================
 def _load_usage():
     with usage_lock:
@@ -234,6 +244,88 @@ def check_and_consume_quota(api_key, uid, tier):
 
 
 # ============================================================
+#  DETAILED USAGE (key → date → uid → stats) for Master Panel
+# ============================================================
+def _load_usage_detail():
+    if not os.path.exists(USAGE_DETAIL_PATH):
+        return {}
+    try:
+        with open(USAGE_DETAIL_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_usage_detail(data):
+    try:
+        with open(USAGE_DETAIL_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def record_like_usage(api_key: str, uid: str, likes_given: int, server: str, nickname: str = ""):
+    """প্রতিদিন কোন key কোন uid তে কত লাইক দিয়েছে — রেকর্ড"""
+    if not api_key or api_key.startswith("_"):
+        return
+    today = _today_str()
+    data = _load_usage_detail()
+    key_entry = data.setdefault(api_key, {})
+    day_entry = key_entry.setdefault(today, {})
+    uid_entry = day_entry.setdefault(str(uid), {
+        "requests": 0,
+        "likes_given_total": 0,
+        "server": server,
+        "nickname": nickname,
+        "last_at": None,
+    })
+    uid_entry["requests"] = int(uid_entry.get("requests", 0)) + 1
+    uid_entry["likes_given_total"] = int(uid_entry.get("likes_given_total", 0)) + int(likes_given)
+    uid_entry["server"] = server
+    if nickname:
+        uid_entry["nickname"] = nickname
+    uid_entry["last_at"] = _now_local().strftime("%Y-%m-%d %H:%M:%S")
+    _save_usage_detail(data)
+
+
+# ============================================================
+#  BLOCKED UIDs
+# ============================================================
+def _load_blocked():
+    if not os.path.exists(BLOCKED_UIDS_PATH):
+        return set()
+    try:
+        with open(BLOCKED_UIDS_PATH, "r", encoding="utf-8") as f:
+            return set(json.load(f).get("blocked", []))
+    except Exception:
+        return set()
+
+
+def _save_blocked(uids: set):
+    try:
+        with open(BLOCKED_UIDS_PATH, "w", encoding="utf-8") as f:
+            json.dump({"blocked": list(uids)}, f, indent=2)
+    except Exception:
+        pass
+
+
+def is_uid_blocked(uid: str) -> bool:
+    return str(uid) in _load_blocked()
+
+
+def block_uid(uid: str):
+    s = _load_blocked()
+    s.add(str(uid))
+    _save_blocked(s)
+
+
+def unblock_uid(uid: str):
+    s = _load_blocked()
+    s.discard(str(uid))
+    _save_blocked(s)
+
+
+# ============================================================
 #  ACCOUNT LOADER
 # ============================================================
 def _account_path(server_name):
@@ -258,7 +350,7 @@ def load_accounts(server_name):
 
 
 # ============================================================
-#  AUTO.TXT
+#  AUTO.TXT  (NO automatic registration from public like APIs)
 # ============================================================
 def load_auto_targets():
     if not os.path.exists(AUTO_FILE):
@@ -295,6 +387,7 @@ def save_auto_targets(targets):
 
 
 def register_auto_uid(server_name, uid):
+    """Only called from Master Panel — never from public like routes."""
     targets = load_auto_targets()
     srv = server_name.upper()
     targets.setdefault(srv, [])
@@ -493,6 +586,15 @@ _api_key_ctx = threading.local()
 def do_like(uid, server_name, tier="user"):
     api_key = "_auto_" if tier == "auto" else getattr(_api_key_ctx, "key", "")
 
+    # UID block check
+    if is_uid_blocked(str(uid)):
+        return {
+            "error": "This UID is blocked by Master.",
+            "UID": uid,
+            "status": 0,
+            "Owner": OWNER_HANDLE,
+        }
+
     allowed, remaining, reset_at = check_and_consume_quota(api_key, uid, tier)
     if not allowed:
         return {
@@ -535,6 +637,10 @@ def do_like(uid, server_name, tier="user"):
     }
     like_given = max(0, int(after["likes"]) - int(before["likes"]))
 
+    # Record for Master Panel daily stats (not for auto)
+    if tier != "auto":
+        record_like_usage(api_key, str(after["uid"]), like_given, server_name, str(after["name"]))
+
     return {
         "LikesGivenByAPI": like_given,
         "LikesafterCommand": int(after["likes"]),
@@ -569,6 +675,9 @@ def do_auto_like_now():
                 continue
             url = like_url_for(srv)
             for uid in uids:
+                if is_uid_blocked(str(uid)):
+                    print(f"[AUTO-LIKE] {srv} {uid} SKIPPED (blocked)")
+                    continue
                 try:
                     ok = send_likes_from_all_tokens(uid, srv, url, tokens)
                     total += ok
@@ -622,10 +731,10 @@ def start_background_jobs():
 
 
 # ============================================================
-#  MASTER HELPERS
+#  MASTER HELPERS — password only: OWNER-MAHIR
 # ============================================================
-def _master_required(api_key):
-    return classify_key(api_key) == "master"
+def _master_required(api_key_or_pass):
+    return (api_key_or_pass or "").strip() == MASTER_PASSWORD
 
 
 def _safe_file_path(name):
@@ -690,6 +799,7 @@ def route_health():
         "jwt_refresh_hours": JWT_REFRESH_HOURS,
         "daily_limit_user": DAILY_LIMIT_USER,
         "auto_targets_loaded": {k: len(v) for k, v in load_auto_targets().items()},
+        "blocked_count": len(_load_blocked()),
         "endpoints": {
             "short": "/mahir&like?uid={uid}&key={key}",
             "short_server": "/mahir&like?uid={uid}&key={key}&server_name={server}",
@@ -715,15 +825,14 @@ def handle_like():
             return jsonify({"error": f"Unsupported server '{server_name}'"}), 400
 
         _api_key_ctx.key = api_key
-        try:
-            register_auto_uid(server_name, uid)
-        except Exception as e:
-            print(f"[auto-register] warn: {e}")
+        # NO auto-register — only Master Panel can add to auto.txt
 
         result = do_like(uid, server_name, tier=tier)
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
+            if "blocked" in result["error"].lower():
+                return jsonify(result), 403
             return jsonify(result), 500
         return jsonify(result)
     except Exception as e:
@@ -762,15 +871,14 @@ def mahir_like():
             }), 400
 
         _api_key_ctx.key = api_key
-        try:
-            register_auto_uid(server_name, uid)
-        except Exception as e:
-            print(f"[auto-register] warn: {e}")
+        # NO auto-register — only Master Panel can add to auto.txt
 
         result = do_like(uid, server_name, tier=tier)
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
+            if "blocked" in result["error"].lower():
+                return jsonify(result), 403
             return jsonify(result), 500
         return jsonify(result)
     except Exception as e:
@@ -793,13 +901,13 @@ def cron_auto_like():
 
 
 # ============================================================
-#  ROUTES — MASTER PANEL APIs
+#  ROUTES — MASTER PANEL APIs (password: OWNER-MAHIR)
 # ============================================================
 @app.get("/master/api/files")
 def master_files():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     files = []
     for name in EDITABLE_FILES:
@@ -821,7 +929,7 @@ def master_files():
 def master_get_file():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     name = request.args.get("name", "").strip()
     if name not in EDITABLE_FILES:
@@ -836,7 +944,7 @@ def master_save_file():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     name = (data.get("name") or "").strip()
     content = data.get("content", "")
@@ -862,7 +970,7 @@ def master_save_file():
 def master_upload():
     key = (request.form.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     f = request.files.get("file")
     if not f:
@@ -894,35 +1002,15 @@ def master_upload():
     return _jsonify({"ok": True, "name": target_name, "size": len(content)})
 
 
-# ============================================================
-#  AUTO UID BULK UPLOAD (auto.txt-এর জন্য)
-# ============================================================
 @app.post("/master/api/auto/bulk-upload")
 def master_auto_bulk_upload():
-    """
-    Bulk upload UIDs for auto-like targets.
-
-    Accepts:
-      1. Multipart file (name=file) → text file with UIDs (one per line)
-      2. JSON body with 'text' field containing UIDs
-      3. Query/Form params
-
-    Form/JSON fields:
-      - key:         master key (required)
-      - server_name: BD | IND | BR | US | SAC | NA (required)
-      - mode:        'replace' (default) | 'append'
-      - text:        raw text (if not using file upload)
-      - file:        file upload (multipart)
-    """
-    # Master auth
     key = (request.form.get("key")
            or (request.get_json(silent=True) or {}).get("key")
            or request.args.get("key")
            or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
-    # Server
     srv = (request.form.get("server_name")
            or (request.get_json(silent=True) or {}).get("server_name")
            or request.args.get("server_name")
@@ -933,14 +1021,12 @@ def master_auto_bulk_upload():
             "allowed": list(SERVER_ACCOUNT_FILES.keys())
         }), 400
 
-    # Mode
     mode = (request.form.get("mode")
             or (request.get_json(silent=True) or {}).get("mode")
             or "replace").strip().lower()
     if mode not in ("replace", "append"):
         mode = "replace"
 
-    # Get raw text (file upload OR text field)
     raw_text = ""
     f = request.files.get("file")
     if f:
@@ -952,18 +1038,16 @@ def master_auto_bulk_upload():
         data = request.get_json(silent=True) or {}
         raw_text = str(data.get("text") or request.form.get("text") or "")
 
-    # Parse UIDs
     uids = []
     for chunk in raw_text.replace(",", "\n").replace(" ", "\n").replace(";", "\n").split("\n"):
         c = chunk.strip()
         if not c or c.startswith("#"):
             continue
         if c.startswith("[") and c.endswith("]"):
-            continue  # skip section headers
+            continue
         if c.isdigit():
             uids.append(c)
         else:
-            # extract digits from lines like "1234567890: something"
             digits = "".join(ch for ch in c.split(":")[0] if ch.isdigit())
             if digits:
                 uids.append(digits)
@@ -971,14 +1055,12 @@ def master_auto_bulk_upload():
     if not uids:
         return jsonify({"error": "no valid UIDs found in input"}), 400
 
-    # Dedupe preserving order
     uids = list(dict.fromkeys(uids))
 
-    # Apply
     targets = load_auto_targets()
     if mode == "replace":
         targets[srv] = uids
-    else:  # append
+    else:
         existing = targets.get(srv, [])
         for u in uids:
             if u not in existing:
@@ -997,15 +1079,12 @@ def master_auto_bulk_upload():
     })
 
 
-# ============================================================
-#  AUTO UID — add / remove / clear
-# ============================================================
 @app.post("/master/api/auto/add")
 def master_auto_add():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     uid = str(data.get("uid", "")).strip()
     srv = str(data.get("server_name", "")).upper().strip()
@@ -1021,7 +1100,7 @@ def master_auto_remove():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     uid = str(data.get("uid", "")).strip()
     srv = str(data.get("server_name", "")).upper().strip()
@@ -1038,22 +1117,15 @@ def master_auto_remove():
 
 @app.post("/master/api/auto/clear")
 def master_auto_clear():
-    """
-    Clear UIDs.
-    Body: { key, server_name: 'BD' | 'ALL' (optional) }
-    If server_name omitted → clears ALL servers.
-    """
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     srv = str(data.get("server_name", "")).upper().strip()
-
     targets = load_auto_targets()
 
     if not srv or srv == "ALL":
-        # clear everything
         for s in SERVER_ACCOUNT_FILES:
             targets[s] = []
     elif srv in SERVER_ACCOUNT_FILES:
@@ -1065,14 +1137,11 @@ def master_auto_clear():
     return _jsonify({"ok": True, "cleared": srv or "ALL", "auto_targets": targets})
 
 
-# ============================================================
-#  KEYS
-# ============================================================
 @app.get("/master/api/keys")
 def master_get_keys():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     cfg = _read_config()
     return _jsonify({
@@ -1087,7 +1156,7 @@ def master_save_keys():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     allowed = data.get("allowed_keys", {})
     admin = data.get("admin_keys", [])
@@ -1105,14 +1174,11 @@ def master_save_keys():
     return _jsonify({"ok": True})
 
 
-# ============================================================
-#  STATS / ACTIONS
-# ============================================================
 @app.get("/master/api/stats")
 def master_stats():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     auto_targets = load_auto_targets()
     usage = _load_usage()
@@ -1156,6 +1222,8 @@ def master_stats():
             "user": len(get_allowed_keys()),
             "master": len(get_admin_keys()),
         },
+        "blocked_uids": sorted(_load_blocked()),
+        "blocked_count": len(_load_blocked()),
     })
 
 
@@ -1164,7 +1232,7 @@ def master_run_auto():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
     threading.Thread(target=do_auto_like_now, daemon=True).start()
     return _jsonify({"ok": True, "message": "auto-like triggered"})
 
@@ -1174,7 +1242,7 @@ def master_jwt_refresh():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
 
     results = {}
     for srv in SERVER_ACCOUNT_FILES:
@@ -1184,6 +1252,133 @@ def master_jwt_refresh():
         except Exception as e:
             results[srv] = f"err: {e}"
     return _jsonify({"ok": True, "refreshed": results})
+
+
+# ---------- Daily usage detail (key → uid → likes) ----------
+@app.get("/master/api/usage-detail")
+def master_usage_detail():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+
+    date = request.args.get("date", _today_str()).strip()
+    data = _load_usage_detail()
+
+    rows = []
+    for api_key, days in data.items():
+        day = days.get(date, {})
+        for uid, info in day.items():
+            rows.append({
+                "api_key": api_key,
+                "uid": uid,
+                "nickname": info.get("nickname", ""),
+                "server": info.get("server", ""),
+                "requests": info.get("requests", 0),
+                "likes_given_total": info.get("likes_given_total", 0),
+                "last_at": info.get("last_at"),
+            })
+    rows.sort(key=lambda x: x["likes_given_total"], reverse=True)
+    return _jsonify({"date": date, "rows": rows, "total_rows": len(rows)})
+
+
+# ---------- Block / Unblock UID ----------
+@app.get("/master/api/blocked")
+def master_blocked_list():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+    return _jsonify({"blocked": sorted(_load_blocked())})
+
+
+@app.post("/master/api/block")
+def master_block_uid():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+    uid = str(data.get("uid", "")).strip()
+    if not uid.isdigit():
+        return jsonify({"error": "valid uid required"}), 400
+    block_uid(uid)
+    return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
+
+
+@app.post("/master/api/unblock")
+def master_unblock_uid():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+    uid = str(data.get("uid", "")).strip()
+    if not uid:
+        return jsonify({"error": "uid required"}), 400
+    unblock_uid(uid)
+    return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
+
+
+# ---------- Player full info (click on UID) ----------
+@app.get("/master/api/player-info")
+def master_player_info():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+
+    uid = request.args.get("uid", "").strip()
+    if not uid.isdigit():
+        return jsonify({"error": "valid uid required"}), 400
+
+    try:
+        r = requests.get(
+            f"https://mahir-info-api.vercel.app/info?uid={uid}",
+            timeout=20, verify=False
+        )
+        if r.status_code != 200:
+            return jsonify({"error": "info api failed", "status": r.status_code}), 502
+        info = r.json()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+    today = _today_str()
+    usage = _load_usage_detail()
+    today_likes = []
+    for api_key, days in usage.items():
+        day = days.get(today, {})
+        if str(uid) in day:
+            today_likes.append({
+                "api_key": api_key,
+                **day[str(uid)]
+            })
+
+    basic = info.get("basicInfo", {}) or {}
+    clan  = info.get("clanBasicInfo", {}) or {}
+    pet   = info.get("petInfo", {}) or {}
+    social = info.get("socialInfo", {}) or {}
+
+    card = {
+        "uid": basic.get("accountId", uid),
+        "nickname": basic.get("nickname", "Unknown"),
+        "level": basic.get("level", 0),
+        "likes": basic.get("liked", 0),
+        "region": basic.get("region", ""),
+        "rank": basic.get("rank", 0),
+        "csRank": basic.get("csRank", 0),
+        "clanName": clan.get("clanName", ""),
+        "clanId": clan.get("clanId", ""),
+        "clanLevel": clan.get("clanLevel", 0),
+        "headPic": basic.get("headPic"),
+        "bannerId": basic.get("bannerId"),
+        "title": basic.get("title"),
+        "lastLogin": basic.get("lastLoginDecoded", ""),
+        "created": basic.get("createdDecoded", ""),
+        "accountAge": basic.get("accountAge", ""),
+        "petName": pet.get("name", ""),
+        "signature": social.get("signature", ""),
+        "creditScore": (info.get("creditScoreInfo") or {}).get("creditScore"),
+        "today_like_activity": today_likes,
+        "is_blocked": is_uid_blocked(str(uid)),
+        "full": info,
+    }
+    return _jsonify(card)
 
 
 # ============================================================
