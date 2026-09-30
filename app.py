@@ -122,10 +122,10 @@ EDITABLE_FILES = [
 ]
 
 CONFIG_RO_PATH = os.path.join(BASE_DIR, "keys.json")
-CONFIG_RW_PATH = os.path.join("/tmp", "keys.json")
-USAGE_PATH     = os.path.join("/tmp", "mahir_usage.json")
-USAGE_DETAIL_PATH = os.path.join("/tmp", "mahir_usage_detail.json")
-BLOCKED_UIDS_PATH = os.path.join("/tmp", "mahir_blocked_uids.json")
+CONFIG_RW_PATH = os.path.join(BASE_DIR, "keys_rw.json")  # persistent on Render
+USAGE_PATH     = os.path.join(BASE_DIR, "mahir_usage.json")
+USAGE_DETAIL_PATH = os.path.join(BASE_DIR, "mahir_usage_detail.json")
+BLOCKED_UIDS_PATH = os.path.join(BASE_DIR, "mahir_blocked_uids.json")
 AUTO_FILE      = os.path.join(BASE_DIR, "auto.txt")
 
 config_lock = RLock()
