@@ -1338,6 +1338,22 @@ def master_player_info():
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
+    # Duo info (optional)
+    duo = None
+    try:
+        dr = requests.get(
+            f"https://mahir-info-api.vercel.app/duo?uid={uid}",
+            timeout=12, verify=False
+        )
+        if dr.status_code == 200:
+            duo_json = dr.json()
+            if duo_json.get("ok"):
+                duo = duo_json.get("data")
+            else:
+                duo = {"status": "none", "msg": duo_json.get("msg", "No Dynamic Duo")}
+    except Exception:
+        duo = None
+
     today = _today_str()
     usage = _load_usage_detail()
     today_likes = []
@@ -1351,8 +1367,11 @@ def master_player_info():
 
     basic = info.get("basicInfo", {}) or {}
     clan  = info.get("clanBasicInfo", {}) or {}
-    pet   = info.get("petInfo", {}) or {}
+    captain = info.get("captainBasicInfo", {}) or {}
     social = info.get("socialInfo", {}) or {}
+
+    head_pic = basic.get("headPic")
+    avatar_url = f"https://iconapi.wasmer.app/{head_pic}" if head_pic else None
 
     card = {
         "uid": basic.get("accountId", uid),
@@ -1365,15 +1384,18 @@ def master_player_info():
         "clanName": clan.get("clanName", ""),
         "clanId": clan.get("clanId", ""),
         "clanLevel": clan.get("clanLevel", 0),
-        "headPic": basic.get("headPic"),
+        "clanLeaderName": captain.get("nickname", ""),
+        "clanLeaderUid": captain.get("accountId", clan.get("captainId", "")),
+        "headPic": head_pic,
+        "avatarUrl": avatar_url,
         "bannerId": basic.get("bannerId"),
         "title": basic.get("title"),
         "lastLogin": basic.get("lastLoginDecoded", ""),
         "created": basic.get("createdDecoded", ""),
         "accountAge": basic.get("accountAge", ""),
-        "petName": pet.get("name", ""),
         "signature": social.get("signature", ""),
         "creditScore": (info.get("creditScoreInfo") or {}).get("creditScore"),
+        "duo": duo,
         "today_like_activity": today_likes,
         "is_blocked": is_uid_blocked(str(uid)),
         "full": info,
