@@ -48,7 +48,7 @@ from flask import (Flask, request, jsonify, Response, render_template,
                    send_from_directory, abort)
 from flask_cors import CORS
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import pad, unpad
 from google.protobuf.json_format import MessageToJson
 
 import requests
@@ -70,6 +70,16 @@ except ImportError:
 import like_pb2
 import like_count_pb2
 import uid_generator_pb2
+
+# Optional protobuf modules for full player info (from MAHIR info service)
+try:
+    import AccountPersonalShow_pb2 as apsPb
+except Exception:
+    apsPb = None
+try:
+    import main_pb2 as mPb
+except Exception:
+    mPb = None
 
 app = Flask(__name__)
 CORS(app)
@@ -1316,7 +1326,339 @@ def master_unblock_uid():
     return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
 
 
-# ---------- Player full info (click on UID) ----------
+# ============================================================
+#  OFFICIAL INFO + DUO (no external vercel API)
+# ============================================================
+_AES_KEY = b'Yg&tc%DEuh6%Zc^8'
+_AES_IV  = b'6oyZDr22E3ychjM%'
+_DUO_HOST = "https://clientbp.ggpolarbear.com"
+_SHOW_HOST = "https://clientbp.ppmainecoonghj.com"
+_OB_CACHE = {"version": None, "ts": 0}
+
+
+def _decode_ts(ts):
+    if not ts:
+        return "—"
+    try:
+        ts = int(ts)
+        if ts > 1e12:
+            ts = ts / 1000
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
+    except Exception:
+        return "—"
+
+
+def _account_age(ts):
+    if not ts:
+        return "—"
+    try:
+        ts = int(ts)
+        if ts > 1e12:
+            ts = ts / 1000
+        diff = time.time() - ts
+        years = int(diff // (365.25 * 24 * 3600))
+        days = int((diff % (365.25 * 24 * 3600)) // (24 * 3600))
+        if years > 0:
+            return f"{years} years {days} days"
+        return f"{days} days"
+    except Exception:
+        return "—"
+
+
+def _get_ob_version():
+    now = time.time()
+    if _OB_CACHE["version"] and (now - _OB_CACHE["ts"]) < 3600:
+        return _OB_CACHE["version"]
+    try:
+        url = ("https://version.ggwhitehawk.com//live/ver.php?version=1.3.0&lang=ar"
+               "&device=android&channel=android&appstore=googleplay&region=ME"
+               "&whitelist_version=1.3.0&whitelist_sp_version=1.0.0"
+               "&device_name=google%20G011A&device_CPU=ARMv7%20VFPv3%20NEON%20VMH"
+               "&device_GPU=Adreno%20(TM)%20640&device_mem=1993")
+        resp = requests.get(url, timeout=10, verify=False)
+        ob = resp.json().get("latest_release_version")
+        if ob:
+            _OB_CACHE["version"] = ob
+            _OB_CACHE["ts"] = now
+            return ob
+    except Exception as e:
+        print(f"[OB] {e}")
+    return "OB55"
+
+
+def _enc_aes(raw: bytes) -> bytes:
+    return AES.new(_AES_KEY, AES.MODE_CBC, _AES_IV).encrypt(pad(raw, 16))
+
+
+def _dec_aes(data: bytes) -> bytes:
+    try:
+        return unpad(AES.new(_AES_KEY, AES.MODE_CBC, _AES_IV).decrypt(data), 16)
+    except Exception:
+        return data
+
+
+def _varint(n: int) -> bytes:
+    res = bytearray()
+    while n >= 0x80:
+        res.append((n & 0x7f) | 0x80)
+        n >>= 7
+    res.append(n)
+    return bytes(res)
+
+
+def _parse_varint(data, idx):
+    v, shift = 0, 0
+    while True:
+        b = data[idx]
+        idx += 1
+        v |= (b & 0x7f) << shift
+        shift += 7
+        if not (b & 0x80):
+            break
+    return v, idx
+
+
+def _parse_len(data, idx):
+    length, idx = _parse_varint(data, idx)
+    return data[idx:idx + length], idx + length
+
+
+def _auth_headers(token: str, host: str = None) -> dict:
+    h = {
+        "Authorization": f"Bearer {token}",
+        "X-Unity-Version": "2018.4.12f1",
+        "ReleaseVersion": _get_ob_version(),
+        "X-GA": "v1 1",
+        "Accept-Encoding": "deflate, gzip",
+        "User-Agent": "GarenaMSDK/4.0.44(25028RN03A ;Android 15;ar;EG;app 1.132.1 2019121229;)",
+        "Connection": "Keep-Alive",
+    }
+    if host:
+        h["Host"] = host
+    return h
+
+
+def _pick_token(server: str = "BD"):
+    tokens = get_or_refresh_tokens(server)
+    if tokens:
+        return tokens[0]
+    for srv in SERVER_ACCOUNT_FILES:
+        tokens = get_or_refresh_tokens(srv)
+        if tokens:
+            return tokens[0]
+    return None
+
+
+def fetch_player_official(uid: str):
+    """Official GetPlayerPersonalShow — needs AccountPersonalShow_pb2 + main_pb2."""
+    token = _pick_token("BD")
+    if not token:
+        raise Exception("No JWT tokens available")
+
+    if mPb is not None and apsPb is not None:
+        msg = mPb.GetPlayerPersonalShow()
+        msg.a = int(uid)
+        msg.b = 7
+        payload = _enc_aes(msg.SerializeToString())
+        headers = _auth_headers(token, "clientbp.ppmainecoonghj.com")
+        headers["Content-Type"] = "application/octet-stream"
+        headers["Accept"] = "*/*"
+        r = requests.post(
+            f"{_SHOW_HOST}/GetPlayerPersonalShow",
+            data=payload, headers=headers, verify=False, timeout=30,
+        )
+        if r.status_code != 200:
+            raise Exception(f"GetPlayerPersonalShow HTTP {r.status_code}")
+        proto = apsPb.AccountPersonalShowInfo()
+        proto.ParseFromString(r.content)
+        data = json.loads(MessageToJson(proto))
+    else:
+        # Fallback: existing like-count style request
+        encrypted = enc(uid)
+        headers = dict(HEADERS)
+        headers["Authorization"] = f"Bearer {token}"
+        headers["ReleaseVersion"] = _get_ob_version()
+        r = requests.post(
+            show_url_for("BD"),
+            data=bytes.fromhex(encrypted),
+            headers=headers, verify=False, timeout=30,
+        )
+        if r.status_code != 200:
+            raise Exception(f"PersonalShow fallback HTTP {r.status_code}")
+        obj = like_count_pb2.Info()
+        obj.ParseFromString(r.content)
+        js = json.loads(MessageToJson(obj))
+        ai = js.get("AccountInfo", js)
+        data = {
+            "basicInfo": {
+                "accountId": ai.get("UID") or ai.get("accountId") or uid,
+                "nickname": ai.get("PlayerNickname") or ai.get("nickname") or "Unknown",
+                "liked": ai.get("Likes") or ai.get("liked") or 0,
+                "level": ai.get("level", 0),
+                "region": ai.get("region", ""),
+                "rank": ai.get("rank", 0),
+                "csRank": ai.get("csRank", 0),
+                "headPic": ai.get("headPic"),
+                "bannerId": ai.get("bannerId"),
+                "lastLoginAt": ai.get("lastLoginAt"),
+                "createAt": ai.get("createAt"),
+            },
+            "clanBasicInfo": js.get("clanBasicInfo") or {},
+            "captainBasicInfo": js.get("captainBasicInfo") or {},
+            "socialInfo": js.get("socialInfo") or {},
+            "creditScoreInfo": js.get("creditScoreInfo") or {},
+        }
+
+    player = data.get("playerPersonalShow", data)
+    basic = player.get("basicInfo", player) or {}
+    if basic:
+        basic["lastLoginDecoded"] = _decode_ts(basic.get("lastLoginAt"))
+        basic["createdDecoded"] = _decode_ts(basic.get("createAt"))
+        basic["accountAge"] = _account_age(basic.get("createAt"))
+        if "liked" not in basic and "tiked" in basic:
+            basic["liked"] = basic["tiked"]
+    captain = player.get("captainBasicInfo") or {}
+    if captain:
+        captain["createdDecoded"] = _decode_ts(captain.get("createAt"))
+        captain["lastLoginDecoded"] = _decode_ts(captain.get("lastLoginAt"))
+
+    return {
+        "basicInfo": basic,
+        "clanBasicInfo": player.get("clanBasicInfo") or {},
+        "captainBasicInfo": captain,
+        "socialInfo": player.get("socialInfo") or {},
+        "creditScoreInfo": player.get("creditScoreInfo") or {},
+        "petInfo": player.get("petInfo") or {},
+        "raw": data,
+    }
+
+
+def parse_duo_bytes(d: bytes):
+    try:
+        idx = 0
+        duo_info_bytes = None
+        while idx < len(d):
+            tag = d[idx]
+            idx += 1
+            fn = tag >> 3
+            wt = tag & 0x07
+            if wt == 0:
+                _, idx = _parse_varint(d, idx)
+            elif wt == 2:
+                val, idx = _parse_len(d, idx)
+                if fn == 1:
+                    duo_info_bytes = val
+            elif wt == 1:
+                idx += 8
+            elif wt == 5:
+                idx += 4
+            else:
+                break
+
+        if not duo_info_bytes:
+            return None, "No Dynamic Duo info found"
+
+        result = {
+            "partner_uid": 0, "status": 0, "score": 0,
+            "days_active": 0, "creation_timestamp": 0,
+        }
+        idx = 0
+        while idx < len(duo_info_bytes):
+            tag = duo_info_bytes[idx]
+            idx += 1
+            fn = tag >> 3
+            wt = tag & 0x07
+            if wt == 0:
+                v, idx = _parse_varint(duo_info_bytes, idx)
+                if fn == 1:
+                    result["partner_uid"] = v
+                elif fn == 2:
+                    result["status"] = v
+                elif fn == 3:
+                    result["score"] = v
+                elif fn == 4:
+                    result["days_active"] = v
+                elif fn == 5:
+                    result["creation_timestamp"] = v
+            elif wt == 2:
+                _, idx = _parse_len(duo_info_bytes, idx)
+            elif wt == 1:
+                idx += 8
+            elif wt == 5:
+                idx += 4
+            else:
+                break
+
+        score = result["score"]
+        if score < 101:
+            lvl = 1
+        elif score < 301:
+            lvl = 2
+        elif score < 501:
+            lvl = 3
+        elif score < 801:
+            lvl = 4
+        elif score < 1201:
+            lvl = 5
+        else:
+            lvl = 6
+
+        status = "Active" if result["status"] == 2 else "Inactive"
+        cts = result["creation_timestamp"]
+        try:
+            ctime = time.strftime('%B %d, %Y at %I:%M %p', time.localtime(cts)) if cts else "—"
+        except Exception:
+            ctime = "—"
+
+        return {
+            "partner_uid": str(result["partner_uid"]),
+            "duo_level": lvl,
+            "duo_score": score,
+            "days_active": result["days_active"],
+            "creation_time": ctime,
+            "creation_timestamp": cts,
+            "status": status,
+        }, "Success"
+    except Exception as e:
+        return None, str(e)
+
+
+def fetch_duo_official(uid: str):
+    token = _pick_token("BD")
+    if not token:
+        return {"ok": False, "error": "No JWT tokens"}
+
+    payload = _enc_aes(b"\x08" + _varint(int(uid)))
+    headers = _auth_headers(token, "clientbp.ggpolarbear.com")
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+    try:
+        r = requests.post(
+            f"{_DUO_HOST}/GetSpecialFriendList",
+            headers=headers, data=payload, timeout=30, verify=False,
+        )
+        if r.status_code == 401:
+            # force refresh and retry once
+            tokens = get_or_refresh_tokens("BD", force=True)
+            if not tokens:
+                return {"ok": False, "error": "JWT refresh failed"}
+            headers["Authorization"] = f"Bearer {tokens[0]}"
+            r = requests.post(
+                f"{_DUO_HOST}/GetSpecialFriendList",
+                headers=headers, data=payload, timeout=30, verify=False,
+            )
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+
+        parsed, msg = parse_duo_bytes(_dec_aes(r.content))
+        if parsed:
+            return {"ok": True, "data": parsed, "msg": msg}
+        return {"ok": False, "msg": msg or "No Dynamic Duo found"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ---------- Player full info (official, no external API) ----------
 @app.get("/master/api/player-info")
 def master_player_info():
     key = request.args.get("key", "").strip()
@@ -1328,31 +1670,15 @@ def master_player_info():
         return jsonify({"error": "valid uid required"}), 400
 
     try:
-        r = requests.get(
-            f"https://mahir-info-api.vercel.app/info?uid={uid}",
-            timeout=20, verify=False
-        )
-        if r.status_code != 200:
-            return jsonify({"error": "info api failed", "status": r.status_code}), 502
-        info = r.json()
+        info = fetch_player_official(uid)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
-    # Duo info (optional)
-    duo = None
-    try:
-        dr = requests.get(
-            f"https://mahir-info-api.vercel.app/duo?uid={uid}",
-            timeout=12, verify=False
-        )
-        if dr.status_code == 200:
-            duo_json = dr.json()
-            if duo_json.get("ok"):
-                duo = duo_json.get("data")
-            else:
-                duo = {"status": "none", "msg": duo_json.get("msg", "No Dynamic Duo")}
-    except Exception:
-        duo = None
+    duo_result = fetch_duo_official(uid)
+    if duo_result.get("ok"):
+        duo = duo_result.get("data")
+    else:
+        duo = {"status": "none", "msg": duo_result.get("msg") or duo_result.get("error") or "No Dynamic Duo"}
 
     today = _today_str()
     usage = _load_usage_detail()
@@ -1366,7 +1692,7 @@ def master_player_info():
             })
 
     basic = info.get("basicInfo", {}) or {}
-    clan  = info.get("clanBasicInfo", {}) or {}
+    clan = info.get("clanBasicInfo", {}) or {}
     captain = info.get("captainBasicInfo", {}) or {}
     social = info.get("socialInfo", {}) or {}
 
