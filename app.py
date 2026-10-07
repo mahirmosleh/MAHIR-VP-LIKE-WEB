@@ -1,1417 +1,1341 @@
-# app.py — MAHIR VIP LIKE — Complete Backend with Master Panel
-# ==========================================================
-#  Web:
-#    /              → User UI
-#    /master        → Master Admin Panel (password: OWNER-MAHIR)
-#
-#  Public APIs:
-#    /mahir&like?uid={uid}&key={key}                    ← SHORT (default BD)
-#    /mahir&like?uid={uid}&key={key}&server_name=IND    ← SHORT + server
-#    /like?uid={uid}&server_name={server}&key={key}     ← FULL
-#    /health
-#    /auto/list
-#    /cron/auto_like?secret={secret}
-#
-#  Master APIs (password: OWNER-MAHIR):
-#    GET    /master/api/files
-#    GET    /master/api/file?name=auto.txt
-#    POST   /master/api/file
-#    POST   /master/api/upload
-#    POST   /master/api/auto/bulk-upload
-#    POST   /master/api/auto/add
-#    POST   /master/api/auto/remove
-#    POST   /master/api/auto/clear
-#    GET    /master/api/keys
-#    POST   /master/api/keys
-#    GET    /master/api/stats
-#    POST   /master/api/run-auto
-#    POST   /master/api/jwt-refresh
-#    GET    /master/api/usage-detail
-#    GET    /master/api/blocked
-#    POST   /master/api/block
-#    POST   /master/api/unblock
-#    GET    /master/api/player-info?uid=
-# ==========================================================
-
-import os
-import sys
-import json
+import uuid
 import time
 import binascii
-import asyncio
+import base64
+import json
+import os
 import threading
-from threading import RLock
-from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
-from flask import (Flask, request, jsonify, Response, render_template,
-                   send_from_directory, abort)
-from flask_cors import CORS
+from flask import Flask, request, make_response, send_file
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
-from google.protobuf.json_format import MessageToJson
-
 import requests
-import aiohttp
 import urllib3
+
+# ====== DEFENSIVE PROTOBUF IMPORT ======
+try:
+    from google.protobuf.internal.decoder import _DecodeVarint, _DecodeVarint32
+except ImportError:
+    def _DecodeVarint(buf, pos):
+        result = 0
+        shift = 0
+        while True:
+            b = buf[pos]
+            result |= (b & 0x7f) << shift
+            pos += 1
+            if not (b & 0x80):
+                break
+            shift += 7
+        return result, pos
+
+    def _DecodeVarint32(buf, pos):
+        return _DecodeVarint(buf, pos)
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
+    import jwt as pyjwt
+    HAS_JWT = True
+except ImportError:
+    HAS_JWT = False
+
+# ====== PRETTY JSON ======
+try:
     import orjson
     def _jsonify(data, status=200):
-        return Response(orjson.dumps(data), status=status,
-                        mimetype='application/json')
+        return make_response(
+            orjson.dumps(data, option=orjson.OPT_INDENT_2),
+            status,
+            {'Content-Type': 'application/json'}
+        )
 except ImportError:
+    import json as _json_mod
     def _jsonify(data, status=200):
-        return Response(json.dumps(data, separators=(',', ':'),
-                                   ensure_ascii=False),
-                        status=status, mimetype='application/json')
-
-import like_pb2
-import like_count_pb2
-import uid_generator_pb2
+        return make_response(
+            _json_mod.dumps(data, indent=2, ensure_ascii=False),
+            status,
+            {'Content-Type': 'application/json'}
+        )
 
 app = Flask(__name__)
-CORS(app)
 
-# ============================================================
-#  BRANDING
-# ============================================================
-OWNER_HANDLE = "TG: @THEMAHIRWORLD"
-DEV_NAME     = "MAHIR"
-TELEGRAM     = "@THEMAHIRWORLD"
-TIKTOK       = "MAHIR__222"
-WEBSITE      = "MAHIR.XO.JE"
-BRAND_NAME   = "MAHIR — Like API"
-BADGE_TEXT   = "MAHIR • XO • JE"
+# ====== GLOBAL SESSION ======
+session = requests.Session()
+adapter = requests.adapters.HTTPAdapter(
+    pool_connections=64, pool_maxsize=64, max_retries=0, pool_block=False
+)
+session.mount('https://', adapter)
+session.mount('http://', adapter)
 
+# ====== AES KEYS ======
+AES_KEY = b'Yg&tc%DEuh6%Zc^8'
+AES_IV  = b'6oyZDr22E3ychjM%'
+
+# ====== VERSION & URLs ======
+LOGIN_URL = "https://loginbp.ppmainecoonghj.com"
+MAJOR_LOGIN_URL = LOGIN_URL + "/MajorLogin"
+OAUTH_URL = "https://100067.connect.garena.com/oauth/guest/token/grant"
+INSPECT_URL = "https://100067.connect.garena.com/oauth/token/inspect"
+FREEFIRE_UPDATE_URL = "https://clientbp.ppmainecoonghj.com/UpdateSocialBasicInfo"
+OB_VERSION = "OB55"
+CLIENT_VERSION = "1.132.1"
+FREEFIRE_VERSION = OB_VERSION
+
+# ====== EXTERNAL JWT API ======
+EXTERNAL_JWT_API = "https://mahir-jwt-generator.vercel.app/token"
+
+# ====== JSON STORAGE (Region-wise) ======
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BD_JSON = os.path.join(BASE_DIR, "bd.json")
+IND_JSON = os.path.join(BASE_DIR, "ind.json")
+SAVE_LOCK = threading.Lock()
 
-# ============================================================
-#  CONFIG
-# ============================================================
-JWT_API_BASE      = "https://mahir-jwt-generator.vercel.app/token"
-JWT_WORKERS       = 100
-LIKE_CONCUR       = 200
-JWT_REFRESH_HOURS = 7
-AUTO_LIKE_HOUR    = 4
-AUTO_LIKE_MINUTE  = 10
-DAILY_LIMIT_USER  = 1
-
-# Master panel password — ONLY this
-MASTER_PASSWORD = "OWNER-MAHIR"
-
-SERVER_ACCOUNT_FILES = {
-    "BD":  "account_bd.txt",
-    "IND": "account_ind.txt",
-    "BR":  "account_br.txt",
-    "US":  "account_us.txt",
-    "SAC": "account_sac.txt",
-    "NA":  "account_na.txt",
-}
-
-EDITABLE_FILES = [
-    "auto.txt",
-    "keys.json",
-    "account_bd.txt",
-    "account_ind.txt",
-    "account_br.txt",
-    "account_us.txt",
-    "account_sac.txt",
-    "account_na.txt",
-]
-
-CONFIG_RO_PATH = os.path.join(BASE_DIR, "keys.json")
-CONFIG_RW_PATH = os.path.join(BASE_DIR, "keys_rw.json")  # persistent on Render
-USAGE_PATH     = os.path.join(BASE_DIR, "mahir_usage.json")
-USAGE_DETAIL_PATH = os.path.join(BASE_DIR, "mahir_usage_detail.json")
-BLOCKED_UIDS_PATH = os.path.join(BASE_DIR, "mahir_blocked_uids.json")
-AUTO_FILE      = os.path.join(BASE_DIR, "auto.txt")
-
-config_lock = RLock()
-usage_lock  = RLock()
-jwt_lock    = RLock()
-file_lock   = RLock()
-
-# ============================================================
-#  CONFIG LOADER
-# ============================================================
-def _active_config_path():
-    return CONFIG_RW_PATH if os.path.exists(CONFIG_RW_PATH) else CONFIG_RO_PATH
-
-
-def _read_config():
-    path = _active_config_path()
+def load_json_list(path):
     if not os.path.exists(path):
-        return {"ALLOWED_KEYS": {}, "ADMIN_KEYS": [], "RESET_TZ": "Asia/Dhaka"}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def get_allowed_keys():
-    with config_lock:
-        return _read_config().get("ALLOWED_KEYS", {})
-
-
-def get_admin_keys():
-    with config_lock:
-        return set(_read_config().get("ADMIN_KEYS", []))
-
-
-def get_reset_tz():
-    with config_lock:
-        return _read_config().get("RESET_TZ", "Asia/Dhaka")
-
-
-def classify_key(api_key):
-    if not api_key:
-        return "invalid"
+        return []
     try:
-        if api_key in get_admin_keys():
-            return "master"
-        if api_key in get_allowed_keys():
-            return "user"
-    except Exception:
-        pass
-    return "invalid"
-
-
-# ============================================================
-#  TIME HELPERS
-# ============================================================
-def _now_local():
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo(get_reset_tz()))
-    except Exception:
-        return datetime.now()
-
-
-def _today_str():
-    return _now_local().strftime("%Y-%m-%d")
-
-
-def _reset_at_str():
-    nxt = (_now_local() + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0)
-    return nxt.strftime("%Y-%m-%d %H:%M")
-
-
-# ============================================================
-#  USAGE / QUOTA (simple daily 1-UID limit for user keys)
-# ============================================================
-def _load_usage():
-    with usage_lock:
-        if not os.path.exists(USAGE_PATH):
-            return {}
-        try:
-            with open(USAGE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-def _save_usage(u):
-    with usage_lock:
-        try:
-            with open(USAGE_PATH, "w", encoding="utf-8") as f:
-                json.dump(u, f)
-        except Exception:
-            pass
-
-
-def check_and_consume_quota(api_key, uid, tier):
-    if tier in ("master", "auto"):
-        return True, None, None
-
-    today = _today_str()
-    u = _load_usage()
-    entry = u.get(api_key, {})
-    if entry.get("date") != today:
-        entry = {"date": today, "uids": []}
-
-    uids = entry.get("uids", [])
-    if uid in uids:
-        return False, max(0, DAILY_LIMIT_USER - len(uids)), _reset_at_str()
-    if len(uids) >= DAILY_LIMIT_USER:
-        return False, 0, _reset_at_str()
-
-    uids.append(uid)
-    entry["uids"] = uids
-    u[api_key] = entry
-    _save_usage(u)
-    return True, max(0, DAILY_LIMIT_USER - len(uids)), None
-
-
-# ============================================================
-#  DETAILED USAGE (key → date → uid → stats) for Master Panel
-# ============================================================
-def _load_usage_detail():
-    if not os.path.exists(USAGE_DETAIL_PATH):
-        return {}
-    try:
-        with open(USAGE_DETAIL_PATH, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {}
+        return []
 
+def save_json_list(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-def _save_usage_detail(data):
-    try:
-        with open(USAGE_DETAIL_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-    except Exception:
-        pass
-
-
-def record_like_usage(api_key: str, uid: str, likes_given: int, server: str, nickname: str = ""):
-    """প্রতিদিন কোন key কোন uid তে কত লাইক দিয়েছে — রেকর্ড"""
-    if not api_key or api_key.startswith("_"):
+def append_account_to_region_json(uid, password, bio, jwt_token, region,
+                                   name=None, account_id=None,
+                                   access_token=None, open_id=None):
+    """region অনুযায়ী bd.json বা ind.json এ অ্যাকাউন্ট যোগ/আপডেট করে"""
+    region = (region or "").upper()
+    if region in ("BD", "BGD", "BANGLADESH"):
+        path = BD_JSON
+    elif region in ("IN", "IND", "INDIA"):
+        path = IND_JSON
+    else:
         return
-    today = _today_str()
-    data = _load_usage_detail()
-    key_entry = data.setdefault(api_key, {})
-    day_entry = key_entry.setdefault(today, {})
-    uid_entry = day_entry.setdefault(str(uid), {
-        "requests": 0,
-        "likes_given_total": 0,
-        "server": server,
-        "nickname": nickname,
-        "last_at": None,
-    })
-    uid_entry["requests"] = int(uid_entry.get("requests", 0)) + 1
-    uid_entry["likes_given_total"] = int(uid_entry.get("likes_given_total", 0)) + int(likes_given)
-    uid_entry["server"] = server
-    if nickname:
-        uid_entry["nickname"] = nickname
-    uid_entry["last_at"] = _now_local().strftime("%Y-%m-%d %H:%M:%S")
-    _save_usage_detail(data)
 
+    with SAVE_LOCK:
+        data = load_json_list(path)
+        existing = next((i for i, x in enumerate(data)
+                         if str(x.get("uid")) == str(uid)), None)
+        entry = {
+            "uid": int(uid) if str(uid).isdigit() else uid,
+            "password": password,
+            "name": name,
+            "account_id": account_id,
+            "region": region,
+            "jwt_token": jwt_token,
+            "access_token": access_token,
+            "open_id": open_id,
+            "bio": bio,
+            "bio_updated": True,
+            "created_at": datetime.utcnow().isoformat()
+        }
+        if existing is not None:
+            data[existing] = entry
+        else:
+            data.append(entry)
+        save_json_list(path, data)
 
-# ============================================================
-#  BLOCKED UIDs
-# ============================================================
-def _load_blocked():
-    if not os.path.exists(BLOCKED_UIDS_PATH):
-        return set()
-    try:
-        with open(BLOCKED_UIDS_PATH, "r", encoding="utf-8") as f:
-            return set(json.load(f).get("blocked", []))
-    except Exception:
-        return set()
-
-
-def _save_blocked(uids: set):
-    try:
-        with open(BLOCKED_UIDS_PATH, "w", encoding="utf-8") as f:
-            json.dump({"blocked": list(uids)}, f, indent=2)
-    except Exception:
-        pass
-
-
-def is_uid_blocked(uid: str) -> bool:
-    return str(uid) in _load_blocked()
-
-
-def block_uid(uid: str):
-    s = _load_blocked()
-    s.add(str(uid))
-    _save_blocked(s)
-
-
-def unblock_uid(uid: str):
-    s = _load_blocked()
-    s.discard(str(uid))
-    _save_blocked(s)
-
-
-# ============================================================
-#  ACCOUNT LOADER
-# ============================================================
-def _account_path(server_name):
-    f = SERVER_ACCOUNT_FILES.get(server_name.upper())
-    return os.path.join(BASE_DIR, f) if f else ""
-
-
-def load_accounts(server_name):
-    path = _account_path(server_name)
-    if not path or not os.path.exists(path):
-        return []
+# ====== PROTOBUF HELPERS ======
+def encode_varint(value):
     out = []
-    with open(path, "r", encoding="utf-8") as f:
-        for ln in f:
-            ln = ln.strip()
-            if not ln or ln.startswith("#") or ":" not in ln:
-                continue
-            u, p = ln.split(":", 1)
-            if u.strip() and p.strip():
-                out.append((u.strip(), p.strip()))
-    return out
+    while True:
+        b = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            break
+    return bytes(out)
 
+def build_payload_from_dict(fields_dict):
+    payload = b''
+    for key, value in sorted(fields_dict.items()):
+        field_num = int(key)
+        if isinstance(value, bool):
+            payload += encode_varint((field_num << 3) | 0) + encode_varint(1 if value else 0)
+        elif isinstance(value, int):
+            payload += encode_varint((field_num << 3) | 0) + encode_varint(value)
+        elif isinstance(value, str):
+            data = value.encode('utf-8')
+            payload += encode_varint((field_num << 3) | 2) + encode_varint(len(data)) + data
+        elif isinstance(value, bytes):
+            payload += encode_varint((field_num << 3) | 2) + encode_varint(len(value)) + value
+        elif isinstance(value, dict):
+            sub = build_payload_from_dict(value)
+            payload += encode_varint((field_num << 3) | 2) + encode_varint(len(sub)) + sub
+        else:
+            raise TypeError(f"Unsupported type for field {field_num}")
+    return payload
 
-# ============================================================
-#  AUTO.TXT  (NO automatic registration from public like APIs)
-# ============================================================
-def load_auto_targets():
-    if not os.path.exists(AUTO_FILE):
-        return {srv: [] for srv in SERVER_ACCOUNT_FILES}
-    result = {srv: [] for srv in SERVER_ACCOUNT_FILES}
-    current = None
-    with open(AUTO_FILE, "r", encoding="utf-8") as f:
-        for ln in f:
-            ln = ln.strip()
-            if not ln or ln.startswith("#"):
-                continue
-            if ln.startswith("[") and ln.endswith("]"):
-                current = ln[1:-1].strip().upper()
-                if current not in SERVER_ACCOUNT_FILES:
-                    current = None
-                continue
-            if current and ln.isdigit():
-                result[current].append(ln)
-    for k in result:
-        result[k] = list(dict.fromkeys(result[k]))
-    return result
+def decode_protobuf(data):
+    pos = 0
+    length = len(data)
+    fields = {}
+    while pos < length:
+        key, pos = _DecodeVarint(data, pos)
+        field_number = key >> 3
+        wire_type = key & 7
+        if wire_type == 0:
+            value, pos = _DecodeVarint(data, pos)
+        elif wire_type == 2:
+            size, pos = _DecodeVarint32(data, pos)
+            raw = data[pos:pos + size]
+            pos += size
+            try:
+                value = decode_protobuf(raw)
+            except Exception:
+                value = raw
+        elif wire_type == 5:
+            value = int.from_bytes(data[pos:pos + 4], 'little'); pos += 4
+        elif wire_type == 1:
+            value = int.from_bytes(data[pos:pos + 8], 'little'); pos += 8
+        else:
+            raise ValueError(f"Unsupported wire type {wire_type}")
+        if field_number in fields:
+            if not isinstance(fields[field_number], list):
+                fields[field_number] = [fields[field_number]]
+            fields[field_number].append(value)
+        else:
+            fields[field_number] = value
+    return fields
 
-
-def save_auto_targets(targets):
-    try:
-        with open(AUTO_FILE, "w", encoding="utf-8") as f:
-            for srv in SERVER_ACCOUNT_FILES:
-                f.write(f"[{srv}]\n")
-                for uid in targets.get(srv, []):
-                    f.write(f"{uid}\n")
-                f.write("\n")
-    except Exception as e:
-        print(f"[auto.txt] save error: {e}")
-
-
-def register_auto_uid(server_name, uid):
-    """Only called from Master Panel — never from public like routes."""
-    targets = load_auto_targets()
-    srv = server_name.upper()
-    targets.setdefault(srv, [])
-    if uid not in targets[srv]:
-        targets[srv].append(uid)
-        save_auto_targets(targets)
-
-
-# ============================================================
-#  JWT
-# ============================================================
-def _fetch_single_jwt(uid, pw, timeout=15):
-    url = f"{JWT_API_BASE}?uid={uid}&password={pw}"
-    try:
-        r = requests.get(url, timeout=timeout, verify=False)
-        if r.status_code != 200:
-            return uid, None
-        try:
-            j = r.json()
-        except ValueError:
-            txt = r.text.strip()
-            return uid, txt if txt and len(txt) > 50 else None
-        token = None
-        if isinstance(j, dict):
-            token = (j.get("jwt_token") or j.get("token")
-                     or j.get("access_token") or j.get("jwt"))
-            if not token and isinstance(j.get("data"), dict):
-                token = (j["data"].get("jwt_token") or j["data"].get("token")
-                         or j["data"].get("jwt"))
-        elif isinstance(j, str):
-            token = j
-        return uid, token
-    except requests.RequestException:
-        return uid, None
-
-
-def generate_jwts(accounts):
-    if not accounts:
-        return []
-    tokens = []
-    with ThreadPoolExecutor(max_workers=JWT_WORKERS) as pool:
-        futures = {pool.submit(_fetch_single_jwt, u, p): u for u, p in accounts}
-        for fut in as_completed(futures):
-            _, tok = fut.result()
-            if tok:
-                tokens.append(tok)
-    return tokens
-
-
-_jwt_cache = {}
-
-
-def get_or_refresh_tokens(server_name, force=False):
-    with jwt_lock:
-        if not force:
-            e = _jwt_cache.get(server_name)
-            if e and time.time() - e["ts"] < JWT_REFRESH_HOURS * 3600:
-                return e["tokens"]
-
-        accounts = load_accounts(server_name)
-        if not accounts:
-            return []
-
-        print(f"[JWT] refresh {server_name}: {len(accounts)} accounts")
-        tokens = generate_jwts(accounts)
-        print(f"[JWT] got {len(tokens)} tokens ({server_name})")
-        if tokens:
-            _jwt_cache[server_name] = {"tokens": tokens, "ts": time.time()}
-        return tokens
-
-
-# ============================================================
-#  FREE FIRE HELPERS
-# ============================================================
-def _encrypt(plaintext):
-    k = b'Yg&tc%DEuh6%Zc^8'
-    iv = b'6oyZDr22E3ychjM%'
-    return binascii.hexlify(
-        AES.new(k, AES.MODE_CBC, iv).encrypt(pad(plaintext, AES.block_size))
-    ).decode()
-
-
-def _pb_msg(uid, region):
-    m = like_pb2.like(); m.uid = int(uid); m.region = region
-    return m.SerializeToString()
-
-
-def _pb_uid(uid):
-    m = uid_generator_pb2.uid_generator()
-    m.krishna_ = int(uid); m.teamXdarks = 1
-    return m.SerializeToString()
-
-
-def enc(uid):
-    return _encrypt(_pb_uid(uid))
-
-
-def like_url_for(s):
-    s = s.upper()
-    if s == "IND":
-        return "https://client.ind.freefiremobile.com/LikeProfile"
-    if s in {"BR", "US", "SAC", "NA"}:
-        return "https://client.us.freefiremobile.com/LikeProfile"
-    return "https://clientbp.ppmainecoonghj.com/LikeProfile"
-
-
-def show_url_for(s):
-    s = s.upper()
-    if s == "IND":
-        return "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
-    if s in {"BR", "US", "SAC", "NA"}:
-        return "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
-    return "https://clientbp.ppmainecoonghj.com/GetPlayerPersonalShow"
-
-
-HEADERS = {
-    'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-    'Connection': "Keep-Alive",
-    'Accept-Encoding': "gzip",
-    'Content-Type': "application/x-www-form-urlencoded",
-    'Expect': "100-continue",
-    'X-Unity-Version': "2018.4.11f1",
-    'X-GA': "v1 1",
-    'ReleaseVersion': "OB55",
+# ====== BIO UPLOAD ======
+BIO_HEADERS = {
+    "Expect": "100-continue",
+    "X-Unity-Version": "2018.4.11f1",
+    "X-GA": "v1 1",
+    "ReleaseVersion": FREEFIRE_VERSION,
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 11; SM-A305F Build/RP1A.200720.012)",
+    "Connection": "Keep-Alive",
+    "Accept-Encoding": "gzip",
 }
 
+def encrypt_bio_data(data_bytes):
+    cipher = AES.new(AES_KEY, AES.MODE_CBC, AES_IV)
+    return cipher.encrypt(pad(data_bytes, AES.block_size))
 
-async def _async_post(enc_uid, token, url, sess):
-    h = dict(HEADERS); h["Authorization"] = f"Bearer {token}"
-    try:
-        async with sess.post(url, data=bytes.fromhex(enc_uid), headers=h) as r:
-            return r.status
-    except Exception:
-        return 0
-
-
-async def _burst(uid, server, url, tokens):
-    enc_uid = _encrypt(_pb_msg(uid, server))
-    conn = aiohttp.TCPConnector(limit=LIKE_CONCUR, ssl=False)
-    sem = asyncio.Semaphore(LIKE_CONCUR)
-    async with aiohttp.ClientSession(connector=conn) as s:
-        async def w(t):
-            async with sem:
-                return await _async_post(enc_uid, t, url, s)
-        return await asyncio.gather(*[w(t) for t in tokens])
-
-
-def send_likes_from_all_tokens(uid, server, url, tokens):
-    if not tokens:
-        return 0
-    try:
-        res = asyncio.run(_burst(uid, server, url, tokens))
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            res = loop.run_until_complete(_burst(uid, server, url, tokens))
-        finally:
-            loop.close()
-    return sum(1 for s in res if s == 200)
-
-
-def make_request(encrypted, server, token):
-    h = dict(HEADERS); h["Authorization"] = f"Bearer {token}"
-    try:
-        r = requests.post(show_url_for(server), data=bytes.fromhex(encrypted),
-                          headers=h, verify=False, timeout=30)
-        obj = like_count_pb2.Info()
-        obj.ParseFromString(r.content)
-        return obj
-    except Exception:
-        return None
-
-
-def parse_account_info(pb):
-    try:
-        if pb is None:
-            return None
-        js = json.loads(MessageToJson(pb))
-        ai = js.get("AccountInfo", {})
-        uid = int(ai.get("UID", 0))
-        if uid <= 0:
-            return None
-        return {"uid": uid,
-                "likes": int(ai.get("Likes", 0)),
-                "name": str(ai.get("PlayerNickname", ""))}
-    except Exception:
-        return None
-
-
-# ============================================================
-#  CORE LIKE
-# ============================================================
-_api_key_ctx = threading.local()
-
-
-def do_like(uid, server_name, tier="user"):
-    api_key = "_auto_" if tier == "auto" else getattr(_api_key_ctx, "key", "")
-
-    # UID block check
-    if is_uid_blocked(str(uid)):
-        return {
-            "error": "This UID is blocked by Master.",
-            "UID": uid,
-            "status": 0,
-            "Owner": OWNER_HANDLE,
-        }
-
-    allowed, remaining, reset_at = check_and_consume_quota(api_key, uid, tier)
-    if not allowed:
-        return {
-            "error": "Daily limit reached (1 UID/day for user keys).",
-            "tier": tier.upper(),
-            "quota_remaining": remaining,
-            "reset_at": reset_at,
-        }
-
-    accounts = load_accounts(server_name)
-    if not accounts:
-        return {
-            "error": f"No guest accounts for {server_name}",
-            "hint": f"Add uid:pass into {SERVER_ACCOUNT_FILES[server_name]}",
-        }
-
-    tokens = get_or_refresh_tokens(server_name)
-    if not tokens:
-        return {"error": "Failed to generate JWT tokens."}
-
-    token = tokens[0]
-    encrypted = enc(uid)
-    before = parse_account_info(make_request(encrypted, server_name, token))
-    if before is None:
-        return {
-            "LikesGivenByAPI": 0, "LikesafterCommand": 0, "LikesbeforeCommand": 0,
-            "PlayerNickname": "Unknown",
-            "UID": int(uid) if str(uid).isdigit() else uid,
-            "GiftCount": 0, "accounts_loaded": len(accounts),
-            "tokens_generated": len(tokens), "server_name": server_name,
-            "tier": tier.upper(), "quota_remaining": remaining,
-            "Owner": OWNER_HANDLE, "status": 0,
-        }
-
-    url = like_url_for(server_name)
-    send_likes_from_all_tokens(uid, server_name, url, tokens)
-
-    after = parse_account_info(make_request(encrypted, server_name, token)) or {
-        "likes": before["likes"], "uid": before["uid"], "name": before["name"]
-    }
-    like_given = max(0, int(after["likes"]) - int(before["likes"]))
-
-    # Record for Master Panel daily stats (not for auto)
-    if tier != "auto":
-        record_like_usage(api_key, str(after["uid"]), like_given, server_name, str(after["name"]))
-
-    return {
-        "LikesGivenByAPI": like_given,
-        "LikesafterCommand": int(after["likes"]),
-        "LikesbeforeCommand": int(before["likes"]),
-        "PlayerNickname": str(after["name"]),
-        "UID": int(after["uid"]),
-        "GiftCount": like_given * 2 if like_given > 0 else 0,
-        "server_name": server_name,
-        "accounts_loaded": len(accounts),
-        "tokens_generated": len(tokens),
-        "tier": tier.upper(),
-        "quota_remaining": remaining,
-        "Owner": OWNER_HANDLE,
-        "status": 1 if like_given > 0 else 2,
-    }
-
-
-# ============================================================
-#  AUTO-LIKE
-# ============================================================
-def do_auto_like_now():
-    print(f"\n[AUTO-LIKE] start {datetime.now():%Y-%m-%d %H:%M:%S}")
-    targets = load_auto_targets()
-    total = 0
-    for srv, uids in targets.items():
-        if not uids:
-            continue
-        try:
-            tokens = get_or_refresh_tokens(srv, force=True)
-            if not tokens:
-                print(f"[AUTO-LIKE] {srv}: no tokens")
-                continue
-            url = like_url_for(srv)
-            for uid in uids:
-                if is_uid_blocked(str(uid)):
-                    print(f"[AUTO-LIKE] {srv} {uid} SKIPPED (blocked)")
-                    continue
-                try:
-                    ok = send_likes_from_all_tokens(uid, srv, url, tokens)
-                    total += ok
-                    print(f"[AUTO-LIKE] {srv} {uid} → {ok}")
-                except Exception as e:
-                    print(f"[AUTO-LIKE] {srv} {uid} err: {e}")
-                time.sleep(0.5)
-        except Exception as e:
-            print(f"[AUTO-LIKE] {srv} err: {e}")
-    print(f"[AUTO-LIKE] done. total={total}\n")
-    return total
-
-
-def _auto_like_scheduler():
-    while True:
-        try:
-            now = datetime.now()
-            target = now.replace(hour=AUTO_LIKE_HOUR, minute=AUTO_LIKE_MINUTE,
-                                 second=0, microsecond=0)
-            if now >= target:
-                target += timedelta(days=1)
-            wait = (target - now).total_seconds()
-            print(f"[SCHED] next auto-like {target:%Y-%m-%d %H:%M:%S}")
-            time.sleep(wait)
-            do_auto_like_now()
-        except Exception as e:
-            print(f"[SCHED] err: {e}")
-            time.sleep(60)
-
-
-def _jwt_refresh_scheduler():
-    while True:
-        try:
-            time.sleep(JWT_REFRESH_HOURS * 3600)
-            print(f"\n[JWT-REFRESH] {datetime.now():%Y-%m-%d %H:%M:%S}")
-            for srv in SERVER_ACCOUNT_FILES:
-                try:
-                    toks = get_or_refresh_tokens(srv, force=True)
-                    print(f"[JWT-REFRESH] {srv}: {len(toks)}")
-                except Exception as e:
-                    print(f"[JWT-REFRESH] {srv} err: {e}")
-        except Exception as e:
-            print(f"[JWT-REFRESH] err: {e}")
-            time.sleep(60)
-
-
-def start_background_jobs():
-    threading.Thread(target=_auto_like_scheduler, daemon=True).start()
-    threading.Thread(target=_jwt_refresh_scheduler, daemon=True).start()
-    print("[*] Background jobs started")
-
-
-# ============================================================
-#  MASTER HELPERS — password only: OWNER-MAHIR
-# ============================================================
-def _master_required(api_key_or_pass):
-    return (api_key_or_pass or "").strip() == MASTER_PASSWORD
-
-
-def _safe_file_path(name):
-    if name not in EDITABLE_FILES:
-        return None
-    return os.path.join(BASE_DIR, name)
-
-
-def _read_file(name):
-    path = _safe_file_path(name)
-    if not path or not os.path.exists(path):
+def _bytes_to_readable(b: bytes) -> str:
+    """বাইনারি ডেটা থেকে hex + ascii দুটোই দেখায়"""
+    if not b:
         return ""
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
-
-
-def _write_file(name, content):
-    path = _safe_file_path(name)
-    if not path:
-        raise ValueError("file not allowed")
-    with file_lock:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-
-# ============================================================
-#  ROUTES — USER
-# ============================================================
-@app.get("/")
-def index():
-    return render_template(
-        "index.html",
-        brand=BRAND_NAME, dev=DEV_NAME, tg=TELEGRAM,
-        tiktok=TIKTOK, website=WEBSITE,
-        owner=OWNER_HANDLE, badge=BADGE_TEXT,
-    )
-
-
-@app.get("/master")
-def master_page():
-    return render_template(
-        "master.html",
-        brand=BRAND_NAME, dev=DEV_NAME, tg=TELEGRAM,
-        tiktok=TIKTOK, website=WEBSITE,
-        owner=OWNER_HANDLE, badge=BADGE_TEXT,
-        servers=list(SERVER_ACCOUNT_FILES.keys()),
-    )
-
-
-@app.get("/health")
-def route_health():
-    return _jsonify({
-        "status": "ok",
-        "service": BRAND_NAME,
-        "dev": DEV_NAME,
-        "website": WEBSITE,
-        "tg": TELEGRAM,
-        "tiktok": TIKTOK,
-        "jwt_api": JWT_API_BASE,
-        "servers": list(SERVER_ACCOUNT_FILES.keys()),
-        "auto_like_at": f"{AUTO_LIKE_HOUR:02d}:{AUTO_LIKE_MINUTE:02d}",
-        "jwt_refresh_hours": JWT_REFRESH_HOURS,
-        "daily_limit_user": DAILY_LIMIT_USER,
-        "auto_targets_loaded": {k: len(v) for k, v in load_auto_targets().items()},
-        "blocked_count": len(_load_blocked()),
-        "endpoints": {
-            "short": "/mahir&like?uid={uid}&key={key}",
-            "short_server": "/mahir&like?uid={uid}&key={key}&server_name={server}",
-            "full": "/like?uid={uid}&server_name={server}&key={key}",
-            "master": "/master",
-        },
-    })
-
-
-@app.get("/like")
-def handle_like():
+    hex_str = b.hex()
     try:
-        uid = request.args.get("uid", "").strip()
-        server_name = request.args.get("server_name", "").upper().strip()
-        api_key = request.args.get("key", "").strip()
+        txt = b.decode('utf-8')
+        printable = all(c.isprintable() or c in '\r\n\t' for c in txt)
+        if printable and txt.strip():
+            return f'"{txt}" (hex={hex_str[:60]}...)'
+    except Exception:
+        pass
+    return f"hex={hex_str[:80]}"
 
-        tier = classify_key(api_key)
-        if tier == "invalid":
-            return jsonify({"error": "Invalid or missing API key"}), 403
-        if not uid or not server_name:
-            return jsonify({"error": "UID and server_name required"}), 400
-        if server_name not in SERVER_ACCOUNT_FILES:
-            return jsonify({"error": f"Unsupported server '{server_name}'"}), 400
+def _hex_to_ascii(hex_str):
+    """hex string কে protobuf/ascii তে কনভার্ট করে দেখানোর জন্য"""
+    if not hex_str:
+        return ""
+    try:
+        raw = bytes.fromhex(hex_str)
+    except Exception:
+        return hex_str
+    try:
+        dec = decode_protobuf(raw)
+        parts = []
+        for k, v in dec.items():
+            if isinstance(v, bytes):
+                parts.append(f"{k}: {_bytes_to_readable(v)}")
+            elif isinstance(v, dict):
+                sub = ", ".join(f"{sk}:{_bytes_to_readable(sv) if isinstance(sv,bytes) else sv}"
+                                for sk, sv in v.items())
+                parts.append(f"{k}: {{{sub}}}")
+            else:
+                parts.append(f"{k}: {v}")
+        return " | ".join(parts)
+    except Exception:
+        pass
+    try:
+        txt = raw.decode('utf-8', errors='replace')
+        if txt and any(c.isprintable() for c in txt):
+            return txt
+    except Exception:
+        pass
+    return hex_str
 
-        _api_key_ctx.key = api_key
-        # NO auto-register — only Master Panel can add to auto.txt
-
-        result = do_like(uid, server_name, tier=tier)
-        if result.get("error"):
-            if "Daily limit" in result["error"]:
-                return jsonify(result), 429
-            if "blocked" in result["error"].lower():
-                return jsonify(result), 403
-            return jsonify(result), 500
-        return jsonify(result)
+def upload_bio_request(jwt_token, bio_text):
+    try:
+        fields = {2: 17, 5: {}, 6: {}, 8: bio_text, 9: 1, 11: {}, 12: {}}
+        data_bytes = build_payload_from_dict(fields)
+        encrypted = encrypt_bio_data(data_bytes)
+        headers = BIO_HEADERS.copy()
+        headers["Authorization"] = f"Bearer {jwt_token}"
+        resp = session.post(FREEFIRE_UPDATE_URL, headers=headers,
+                            data=encrypted, timeout=15, verify=False)
+        raw_hex = binascii.hexlify(resp.content).decode('utf-8')
+        ok = (resp.status_code == 200)
+        return {
+            "status": "success" if ok else "failed",
+            "code": resp.status_code,
+            "server_response": raw_hex,
+            "server_ascii": _hex_to_ascii(raw_hex)
+        }
     except Exception as e:
-        return jsonify({"error": "runtime_error", "detail": str(e)}), 500
+        return {"status": "failed", "code": 500,
+                "server_response": str(e), "server_ascii": str(e)}
 
-
-@app.get("/mahir&like")
-def mahir_like():
+# ====== EXTERNAL JWT FETCHER ======
+def fetch_jwt_from_external(uid, password):
+    """বাইরের API থেকে সম্পূর্ণ JWT রেসপন্স আনে"""
     try:
-        uid = request.args.get("uid", "").strip()
-        api_key = request.args.get("key", "").strip()
-        server_name = request.args.get("server_name", "").upper().strip()
-
-        if not uid or not uid.isdigit():
-            return jsonify({
-                "error": "Valid numeric uid required",
-                "example": "/mahir&like?uid=1234567890&key=MAHIR-USER-001",
-                "Owner": OWNER_HANDLE
-            }), 400
-
-        tier = classify_key(api_key)
-        if tier == "invalid":
-            return jsonify({
-                "error": "Invalid or missing API key",
-                "example": "/mahir&like?uid=1234567890&key=MAHIR-USER-001",
-                "Owner": OWNER_HANDLE
-            }), 403
-
-        if not server_name:
-            server_name = "BD"
-        if server_name not in SERVER_ACCOUNT_FILES:
-            return jsonify({
-                "error": f"Unsupported server '{server_name}'",
-                "allowed": list(SERVER_ACCOUNT_FILES.keys()),
-                "default": "BD"
-            }), 400
-
-        _api_key_ctx.key = api_key
-        # NO auto-register — only Master Panel can add to auto.txt
-
-        result = do_like(uid, server_name, tier=tier)
-        if result.get("error"):
-            if "Daily limit" in result["error"]:
-                return jsonify(result), 429
-            if "blocked" in result["error"].lower():
-                return jsonify(result), 403
-            return jsonify(result), 500
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": "runtime_error", "detail": str(e)}), 500
-
-
-@app.get("/auto/list")
-def auto_list():
-    return _jsonify({"auto_targets": load_auto_targets()})
-
-
-@app.get("/cron/auto_like")
-def cron_auto_like():
-    secret = request.args.get("secret", "")
-    expected = os.environ.get("CRON_SECRET", "mahir-cron-2025")
-    if secret != expected:
-        return jsonify({"error": "forbidden"}), 403
-    threading.Thread(target=do_auto_like_now, daemon=True).start()
-    return jsonify({"ok": True, "triggered": True})
-
-
-# ============================================================
-#  ROUTES — MASTER PANEL APIs (password: OWNER-MAHIR)
-# ============================================================
-@app.get("/master/api/files")
-def master_files():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    files = []
-    for name in EDITABLE_FILES:
-        path = os.path.join(BASE_DIR, name)
-        exists = os.path.exists(path)
-        size = os.path.getsize(path) if exists else 0
-        lines = 0
-        if exists and name.endswith(".txt"):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    lines = sum(1 for _ in f)
-            except Exception:
-                pass
-        files.append({"name": name, "exists": exists, "size": size, "lines": lines})
-    return _jsonify({"files": files})
-
-
-@app.get("/master/api/file")
-def master_get_file():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    name = request.args.get("name", "").strip()
-    if name not in EDITABLE_FILES:
-        return jsonify({"error": "file not allowed"}), 400
-
-    content = _read_file(name)
-    return _jsonify({"name": name, "content": content})
-
-
-@app.post("/master/api/file")
-def master_save_file():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or request.args.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    name = (data.get("name") or "").strip()
-    content = data.get("content", "")
-
-    if name not in EDITABLE_FILES:
-        return jsonify({"error": "file not allowed"}), 400
-
-    if name == "keys.json":
-        try:
-            json.loads(content)
-        except Exception as e:
-            return jsonify({"error": f"invalid JSON: {e}"}), 400
-
-    try:
-        _write_file(name, content)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    return _jsonify({"ok": True, "name": name, "size": len(content)})
-
-
-@app.post("/master/api/upload")
-def master_upload():
-    key = (request.form.get("key") or request.args.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    f = request.files.get("file")
-    if not f:
-        return jsonify({"error": "no file uploaded"}), 400
-
-    target_name = (request.form.get("name") or f.filename or "").strip()
-    if target_name not in EDITABLE_FILES:
-        return jsonify({
-            "error": f"filename '{target_name}' not allowed",
-            "allowed": EDITABLE_FILES,
-        }), 400
-
-    try:
-        content = f.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        return jsonify({"error": f"read error: {e}"}), 400
-
-    if target_name == "keys.json":
-        try:
-            json.loads(content)
-        except Exception as e:
-            return jsonify({"error": f"invalid JSON: {e}"}), 400
-
-    try:
-        _write_file(target_name, content)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    return _jsonify({"ok": True, "name": target_name, "size": len(content)})
-
-
-@app.post("/master/api/auto/bulk-upload")
-def master_auto_bulk_upload():
-    key = (request.form.get("key")
-           or (request.get_json(silent=True) or {}).get("key")
-           or request.args.get("key")
-           or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    srv = (request.form.get("server_name")
-           or (request.get_json(silent=True) or {}).get("server_name")
-           or request.args.get("server_name")
-           or "").upper().strip()
-    if srv not in SERVER_ACCOUNT_FILES:
-        return jsonify({
-            "error": "valid server_name required",
-            "allowed": list(SERVER_ACCOUNT_FILES.keys())
-        }), 400
-
-    mode = (request.form.get("mode")
-            or (request.get_json(silent=True) or {}).get("mode")
-            or "replace").strip().lower()
-    if mode not in ("replace", "append"):
-        mode = "replace"
-
-    raw_text = ""
-    f = request.files.get("file")
-    if f:
-        try:
-            raw_text = f.read().decode("utf-8", errors="replace")
-        except Exception as e:
-            return jsonify({"error": f"file read error: {e}"}), 400
-    else:
-        data = request.get_json(silent=True) or {}
-        raw_text = str(data.get("text") or request.form.get("text") or "")
-
-    uids = []
-    for chunk in raw_text.replace(",", "\n").replace(" ", "\n").replace(";", "\n").split("\n"):
-        c = chunk.strip()
-        if not c or c.startswith("#"):
-            continue
-        if c.startswith("[") and c.endswith("]"):
-            continue
-        if c.isdigit():
-            uids.append(c)
-        else:
-            digits = "".join(ch for ch in c.split(":")[0] if ch.isdigit())
-            if digits:
-                uids.append(digits)
-
-    if not uids:
-        return jsonify({"error": "no valid UIDs found in input"}), 400
-
-    uids = list(dict.fromkeys(uids))
-
-    targets = load_auto_targets()
-    if mode == "replace":
-        targets[srv] = uids
-    else:
-        existing = targets.get(srv, [])
-        for u in uids:
-            if u not in existing:
-                existing.append(u)
-        targets[srv] = existing
-
-    save_auto_targets(targets)
-
-    return _jsonify({
-        "ok": True,
-        "server_name": srv,
-        "mode": mode,
-        "imported": len(uids),
-        "total_for_server": len(targets[srv]),
-        "auto_targets": targets,
-    })
-
-
-@app.post("/master/api/auto/add")
-def master_auto_add():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    uid = str(data.get("uid", "")).strip()
-    srv = str(data.get("server_name", "")).upper().strip()
-    if not uid.isdigit() or srv not in SERVER_ACCOUNT_FILES:
-        return jsonify({"error": "uid (digits) and valid server_name required"}), 400
-
-    register_auto_uid(srv, uid)
-    return _jsonify({"ok": True, "auto_targets": load_auto_targets()})
-
-
-@app.post("/master/api/auto/remove")
-def master_auto_remove():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    uid = str(data.get("uid", "")).strip()
-    srv = str(data.get("server_name", "")).upper().strip()
-    if not uid or srv not in SERVER_ACCOUNT_FILES:
-        return jsonify({"error": "uid and valid server_name required"}), 400
-
-    targets = load_auto_targets()
-    if srv in targets and uid in targets[srv]:
-        targets[srv].remove(uid)
-        save_auto_targets(targets)
-
-    return _jsonify({"ok": True, "auto_targets": targets})
-
-
-@app.post("/master/api/auto/clear")
-def master_auto_clear():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    srv = str(data.get("server_name", "")).upper().strip()
-    targets = load_auto_targets()
-
-    if not srv or srv == "ALL":
-        for s in SERVER_ACCOUNT_FILES:
-            targets[s] = []
-    elif srv in SERVER_ACCOUNT_FILES:
-        targets[srv] = []
-    else:
-        return jsonify({"error": f"invalid server_name '{srv}'"}), 400
-
-    save_auto_targets(targets)
-    return _jsonify({"ok": True, "cleared": srv or "ALL", "auto_targets": targets})
-
-
-@app.get("/master/api/keys")
-def master_get_keys():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    cfg = _read_config()
-    return _jsonify({
-        "allowed_keys": cfg.get("ALLOWED_KEYS", {}),
-        "admin_keys": cfg.get("ADMIN_KEYS", []),
-        "reset_tz": cfg.get("RESET_TZ", "Asia/Dhaka"),
-    })
-
-
-@app.post("/master/api/keys")
-def master_save_keys():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    allowed = data.get("allowed_keys", {})
-    admin = data.get("admin_keys", [])
-    tz = data.get("reset_tz", "Asia/Dhaka")
-
-    if not isinstance(allowed, dict) or not isinstance(admin, list):
-        return jsonify({"error": "invalid types"}), 400
-
-    cfg = {"ALLOWED_KEYS": allowed, "ADMIN_KEYS": admin, "RESET_TZ": tz}
-    content = json.dumps(cfg, indent=2, ensure_ascii=False)
-    try:
-        _write_file("keys.json", content)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    return _jsonify({"ok": True})
-
-
-@app.get("/master/api/stats")
-def master_stats():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    auto_targets = load_auto_targets()
-    usage = _load_usage()
-    today = _today_str()
-
-    today_usage = {}
-    total_requests = 0
-    for k, v in usage.items():
-        if v.get("date") == today:
-            today_usage[k] = len(v.get("uids", []))
-            total_requests += len(v.get("uids", []))
-
-    file_stats = {}
-    for name in EDITABLE_FILES:
-        path = os.path.join(BASE_DIR, name)
-        if os.path.exists(path):
-            file_stats[name] = os.path.getsize(path)
-
-    jwt_status = {}
-    for srv in SERVER_ACCOUNT_FILES:
-        e = _jwt_cache.get(srv)
-        if e:
-            age = int(time.time() - e["ts"])
-            jwt_status[srv] = {
-                "tokens": len(e["tokens"]),
-                "age_seconds": age,
-                "next_refresh_in": max(0, JWT_REFRESH_HOURS * 3600 - age),
-            }
-        else:
-            jwt_status[srv] = {"tokens": 0, "age_seconds": None}
-
-    return _jsonify({
-        "today": today,
-        "auto_targets": {k: len(v) for k, v in auto_targets.items()},
-        "auto_targets_full": auto_targets,
-        "today_usage": today_usage,
-        "total_today_requests": total_requests,
-        "file_stats": file_stats,
-        "jwt_status": jwt_status,
-        "keys_count": {
-            "user": len(get_allowed_keys()),
-            "master": len(get_admin_keys()),
-        },
-        "blocked_uids": sorted(_load_blocked()),
-        "blocked_count": len(_load_blocked()),
-    })
-
-
-@app.post("/master/api/run-auto")
-def master_run_auto():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or request.args.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    threading.Thread(target=do_auto_like_now, daemon=True).start()
-    return _jsonify({"ok": True, "message": "auto-like triggered"})
-
-
-@app.post("/master/api/jwt-refresh")
-def master_jwt_refresh():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or request.args.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    results = {}
-    for srv in SERVER_ACCOUNT_FILES:
-        try:
-            toks = get_or_refresh_tokens(srv, force=True)
-            results[srv] = len(toks)
-        except Exception as e:
-            results[srv] = f"err: {e}"
-    return _jsonify({"ok": True, "refreshed": results})
-
-
-# ---------- Daily usage detail (key → uid → likes) ----------
-@app.get("/master/api/usage-detail")
-def master_usage_detail():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    date = request.args.get("date", _today_str()).strip()
-    data = _load_usage_detail()
-
-    rows = []
-    for api_key, days in data.items():
-        day = days.get(date, {})
-        for uid, info in day.items():
-            rows.append({
-                "api_key": api_key,
-                "uid": uid,
-                "nickname": info.get("nickname", ""),
-                "server": info.get("server", ""),
-                "requests": info.get("requests", 0),
-                "likes_given_total": info.get("likes_given_total", 0),
-                "last_at": info.get("last_at"),
-            })
-    rows.sort(key=lambda x: x["likes_given_total"], reverse=True)
-    return _jsonify({"date": date, "rows": rows, "total_rows": len(rows)})
-
-
-# ---------- Block / Unblock UID ----------
-@app.get("/master/api/blocked")
-def master_blocked_list():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    return _jsonify({"blocked": sorted(_load_blocked())})
-
-
-@app.post("/master/api/block")
-def master_block_uid():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    uid = str(data.get("uid", "")).strip()
-    if not uid.isdigit():
-        return jsonify({"error": "valid uid required"}), 400
-    block_uid(uid)
-    return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
-
-
-@app.post("/master/api/unblock")
-def master_unblock_uid():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    uid = str(data.get("uid", "")).strip()
-    if not uid:
-        return jsonify({"error": "uid required"}), 400
-    unblock_uid(uid)
-    return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
-
-
-# ---------- Player full info (click on UID) ----------
-@app.get("/master/api/player-info")
-def master_player_info():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    uid = request.args.get("uid", "").strip()
-    if not uid.isdigit():
-        return jsonify({"error": "valid uid required"}), 400
-
-    try:
-        r = requests.get(
-            f"https://mahir-info-api.vercel.app/info?uid={uid}",
-            timeout=20, verify=False
+        r = session.get(
+            EXTERNAL_JWT_API,
+            params={"uid": uid, "password": password},
+            timeout=30,
+            verify=False
         )
         if r.status_code != 200:
-            return jsonify({"error": "info api failed", "status": r.status_code}), 502
-        info = r.json()
+            return None, f"External API HTTP {r.status_code}"
+        data = r.json()
+        if str(data.get("status", "")).lower() != "success":
+            return None, data.get("message") or "External API failed"
+        if not data.get("jwt_token"):
+            return None, "jwt_token missing in response"
+        return data, None
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        return None, f"External API error: {e}"
 
-    # Duo info (optional)
-    duo = None
+# ====== JWT DECODER (শুধু display-এর জন্য) ======
+XOR_SECRET = b"1e5898ccb8dfdd921f9bdea848768b64a201"
+
+def decode_nickname(encoded):
+    if not isinstance(encoded, str) or not encoded:
+        return encoded
+    for decoder in (base64.b64decode, base64.urlsafe_b64decode):
+        try:
+            s = encoded + '=' * ((4 - len(encoded) % 4) % 4)
+            raw = decoder(s)
+            dec = bytes(b ^ XOR_SECRET[i % len(XOR_SECRET)]
+                        for i, b in enumerate(raw))
+            txt = dec.decode('utf-8', errors='replace')
+            if txt and '\ufffd' not in txt:
+                return txt
+        except Exception:
+            continue
+    return encoded
+
+def _decode_jwt_payload(token):
     try:
-        dr = requests.get(
-            f"https://mahir-info-api.vercel.app/duo?uid={uid}",
-            timeout=12, verify=False
-        )
-        if dr.status_code == 200:
-            duo_json = dr.json()
-            if duo_json.get("ok"):
-                duo = duo_json.get("data")
-            else:
-                duo = {"status": "none", "msg": duo_json.get("msg", "No Dynamic Duo")}
+        parts = token.split('.')
+        if len(parts) < 2:
+            return None
+        p = parts[1] + '=' * ((4 - len(parts[1]) % 4) % 4)
+        try:
+            raw = base64.urlsafe_b64decode(p)
+        except Exception:
+            raw = base64.b64decode(p)
+        return json.loads(raw.decode('utf-8'))
     except Exception:
-        duo = None
+        return None
 
-    today = _today_str()
-    usage = _load_usage_detail()
-    today_likes = []
-    for api_key, days in usage.items():
-        day = days.get(today, {})
-        if str(uid) in day:
-            today_likes.append({
-                "api_key": api_key,
-                **day[str(uid)]
-            })
-
-    basic = info.get("basicInfo", {}) or {}
-    clan  = info.get("clanBasicInfo", {}) or {}
-    captain = info.get("captainBasicInfo", {}) or {}
-    social = info.get("socialInfo", {}) or {}
-
-    head_pic = basic.get("headPic")
-    avatar_url = f"https://iconapi.wasmer.app/{head_pic}" if head_pic else None
-
-    card = {
-        "uid": basic.get("accountId", uid),
-        "nickname": basic.get("nickname", "Unknown"),
-        "level": basic.get("level", 0),
-        "likes": basic.get("liked", 0),
-        "region": basic.get("region", ""),
-        "rank": basic.get("rank", 0),
-        "csRank": basic.get("csRank", 0),
-        "clanName": clan.get("clanName", ""),
-        "clanId": clan.get("clanId", ""),
-        "clanLevel": clan.get("clanLevel", 0),
-        "clanLeaderName": captain.get("nickname", ""),
-        "clanLeaderUid": captain.get("accountId", clan.get("captainId", "")),
-        "headPic": head_pic,
-        "avatarUrl": avatar_url,
-        "bannerId": basic.get("bannerId"),
-        "title": basic.get("title"),
-        "lastLogin": basic.get("lastLoginDecoded", ""),
-        "created": basic.get("createdDecoded", ""),
-        "accountAge": basic.get("accountAge", ""),
-        "signature": social.get("signature", ""),
-        "creditScore": (info.get("creditScoreInfo") or {}).get("creditScore"),
-        "duo": duo,
-        "today_like_activity": today_likes,
-        "is_blocked": is_uid_blocked(str(uid)),
-        "full": info,
-    }
-    return _jsonify(card)
-
-
-# ============================================================
-#  ENTRY
-# ============================================================
-if __name__ == "__main__":
-    start_background_jobs()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-else:
+def decode_jwt_info(token):
+    if not token:
+        return None, None, None, None
+    payload = _decode_jwt_payload(token)
+    if payload is None and HAS_JWT:
+        try:
+            payload = pyjwt.decode(token, options={"verify_signature": False})
+        except Exception:
+            payload = None
+    if payload is None:
+        return None, None, None, None
     try:
-        start_background_jobs()
-    except Exception as e:
-        print(f"[boot] background jobs error: {e}")
+        nickname = payload.get("nickname")
+        if isinstance(nickname, str):
+            nickname = decode_nickname(nickname)
+        return (payload.get("account_id"), nickname,
+                payload.get("lock_region"), payload.get("external_type"))
+    except Exception:
+        return None, None, None, None
+
+# ====== RESOLVE JWT (শুধু বাইরের API) ======
+def resolve_jwt(jwt_token=None, uid=None, password=None, access_token=None):
+    # ১. সরাসরি JWT
+    if jwt_token:
+        uid_, name_, region_, _ = decode_jwt_info(jwt_token)
+        return jwt_token, None, {
+            "uid": str(uid_) if uid_ else None,
+            "name": name_, "region": region_,
+            "method": "Direct JWT"
+        }
+
+    # ২. UID + Pass → বাইরের API
+    if uid and password:
+        data, err = fetch_jwt_from_external(uid, password)
+        if err:
+            return None, f"External API failed: {err}", None
+
+        jwt_ = data.get("jwt_token")
+        ati = data.get("access_token_info") or {}
+        return jwt_, None, {
+            "uid": data.get("account_id") or str(uid),
+            "name": data.get("nickname"),
+            "region": data.get("region"),
+            "method": "External API",
+            "account_id": data.get("account_id"),
+            "open_id": data.get("open_id") or ati.get("open_id"),
+            "access_token": data.get("access_token"),
+            "external_full": data
+        }
+
+    # ৩. Access Token
+    if access_token:
+        try:
+            r = session.get(f"{INSPECT_URL}?token={access_token}",
+                            timeout=10, verify=False)
+            if r.status_code != 200:
+                return None, f"Inspect HTTP {r.status_code}", None
+            j = r.json()
+            open_id = j.get("open_id")
+            if not open_id:
+                return None, "open_id not found", None
+        except Exception as e:
+            return None, f"Inspect error: {e}", None
+
+        # access token দিয়ে বাইরের API-র মতো JWT নেই — ব্যবহারকারীকে সরাসরি access token API ব্যবহার করতে বলি
+        return None, "Access token flow — use external API only", None
+
+    return None, "No credentials provided (need jwt / uid+pass)", None
+
+
+# ====== HTML PAGE ======
+HTML_PAGE = r'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🔥 MAHIR FREE FIRE BIO CHANGER</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --primary:#ff4444;--primary-dark:#cc0000;--accent:#ffaa00;
+  --bg:#0f0f23;--surface:rgba(18,18,40,0.97);
+  --text:#f0f0ff;--muted:#8888aa;
+  --success:#00e87a;--error:#ff4455;--warn:#ffbb00;
+  --glass:rgba(255,255,255,0.06);--border:rgba(255,255,255,0.10);
+  --glow-r:0 0 18px rgba(255,68,68,.55),0 0 40px rgba(255,68,68,.22);
+  --radius:14px;--radius-sm:9px;
+  --font-body:'Rajdhani',sans-serif;
+  --font-display:'Orbitron',sans-serif;
+}
+body{background:var(--bg);color:var(--text);min-height:100vh;
+  font-family:var(--font-body);font-size:15px;line-height:1.5;
+  background-image:
+    radial-gradient(ellipse 60% 40% at 15% 0%,rgba(255,68,68,.10) 0%,transparent 60%),
+    radial-gradient(ellipse 50% 35% at 85% 100%,rgba(255,170,0,.09) 0%,transparent 60%);
+}
+.wrap{max-width:1220px;margin:0 auto;padding:16px}
+.hdr{text-align:center;padding:32px 24px 26px;background:var(--surface);
+  border-radius:20px;border:1.5px solid var(--border);box-shadow:var(--glow-r);
+  margin-bottom:20px;position:relative;overflow:hidden;}
+.brand{font-family:var(--font-display);font-size:clamp(18px,4.2vw,32px);font-weight:900;
+  letter-spacing:2px;background:linear-gradient(90deg,#ff6666,#ffaa00,#ff4444);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  text-transform:uppercase;}
+.tagline{color:var(--muted);font-size:.92rem;margin-top:6px}
+.socials{display:flex;justify-content:center;gap:10px;margin-top:18px;flex-wrap:wrap}
+.socials a{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;
+  border-radius:40px;font-weight:700;font-size:.88rem;color:#fff;text-decoration:none;
+  transition:transform .2s;}
+.socials a:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.s-tg{background:linear-gradient(135deg,#0088cc,#00aced)}
+.s-yt{background:linear-gradient(135deg,#ff0000,#cc0000)}
+.s-tt{background:linear-gradient(135deg,#111,#69c9d0)}
+.main-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--glass);
+  border:1.5px solid var(--border);border-radius:var(--radius);padding:6px;margin-bottom:18px;}
+.m-tab{padding:13px 10px;text-align:center;border-radius:var(--radius-sm);cursor:pointer;
+  font-weight:800;font-size:.95rem;transition:background .2s;
+  display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);}
+.m-tab.on{background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+  color:#fff;box-shadow:0 4px 14px rgba(255,68,68,.35);}
+.m-tab:not(.on):hover{background:rgba(255,255,255,.07);color:var(--text)}
+.m-pane{display:none}.m-pane.on{display:block;animation:fadeUp .25s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.card{background:var(--surface);border:1.5px solid var(--border);
+  border-radius:var(--radius);padding:24px;margin-bottom:18px;}
+.card-title{font-family:var(--font-display);font-size:1.1rem;font-weight:700;
+  display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:12px;
+  border-bottom:1.5px solid var(--border);}
+.card-title i{color:var(--primary);font-size:1rem}
+.fg{margin-bottom:16px}
+.fl{display:block;font-size:.88rem;font-weight:700;color:var(--muted);
+  margin-bottom:7px;letter-spacing:.3px;text-transform:uppercase;}
+.fi,.fta{width:100%;padding:12px 14px;background:var(--glass);
+  border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);
+  font-size:.95rem;font-family:var(--font-body);font-weight:600;outline:none;}
+.fi:focus,.fta:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(255,68,68,.18);}
+.fta{min-height:100px;resize:vertical;font-family:'Courier New',monospace;line-height:1.7;}
+.fctr{display:flex;gap:16px;justify-content:flex-end;font-size:.8rem;
+  font-weight:700;margin-top:5px;color:var(--muted);}
+.fctr .w{color:var(--warn)}.fctr .e{color:var(--error)}
+.ibox{background:rgba(255,170,0,.09);border:1.5px solid rgba(255,170,0,.28);
+  border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:16px;
+  font-size:.88rem;color:#ffcc55;line-height:1.7;}
+.ibox code{background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;
+  color:#ffd966;font-family:monospace;font-size:.82rem;}
+.fmt-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.fmt-btn{padding:7px 14px;border-radius:var(--radius-sm);background:var(--glass);
+  border:1.5px solid var(--border);color:var(--text);font-size:.85rem;font-weight:700;
+  cursor:pointer;font-family:var(--font-body);}
+.fmt-btn:hover{background:rgba(255,68,68,.15);border-color:var(--primary);}
+.preview-wrap{background:rgba(0,0,0,.4);border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);padding:16px;min-height:80px;
+  font-family:'Arial',sans-serif;font-size:1rem;line-height:1.9;word-break:break-word;}
+.pv-line{margin-bottom:4px}
+.auth-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;
+  background:var(--glass);border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);padding:5px;margin-bottom:18px;}
+.a-tab{padding:10px 5px;text-align:center;cursor:pointer;border-radius:7px;
+  font-weight:700;font-size:.8rem;color:var(--muted);
+  display:flex;flex-direction:column;align-items:center;gap:4px;}
+.a-tab.on{background:var(--primary);color:#fff}
+.a-tab:not(.on):hover{background:rgba(255,255,255,.08);color:var(--text)}
+.a-pane{display:none}.a-pane.on{display:block;animation:fadeUp .2s ease}
+.tok-display{background:rgba(0,0,0,.3);border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);padding:12px 14px;font-family:monospace;
+  font-size:.82rem;color:#00ffa3;word-break:break-all;max-height:80px;
+  overflow-y:auto;margin-bottom:12px;}
+.tok-display.empty{color:var(--muted);font-style:italic}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
+  padding:14px 20px;border:none;border-radius:var(--radius-sm);
+  font-family:var(--font-display);font-size:.9rem;font-weight:700;letter-spacing:.8px;
+  text-transform:uppercase;cursor:pointer;position:relative;overflow:hidden;
+  text-decoration:none;}
+.btn-primary{background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+  color:#fff;box-shadow:0 6px 20px rgba(255,68,68,.35);}
+.btn-primary:hover:not(:disabled){transform:translateY(-2px);box-shadow:var(--glow-r);}
+.btn-secondary{background:linear-gradient(135deg,rgba(255,170,0,.2),rgba(255,170,0,.1));
+  color:var(--accent);border:1.5px solid rgba(255,170,0,.35);}
+.btn-secondary:hover:not(:disabled){background:rgba(255,170,0,.25);transform:translateY(-2px);}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important}
+.btn .btn-spin{width:16px;height:16px;border:2.5px solid rgba(255,255,255,.25);
+  border-top-color:#fff;border-radius:50%;animation:spin .65s linear infinite;
+  display:none;flex-shrink:0;}
+.btn.loading .btn-spin{display:inline-block}
+.btn.loading .btn-icon{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.resp-panel{margin-top:14px;border-radius:var(--radius-sm);
+  border:1.5px solid transparent;overflow:hidden;font-size:.9rem;font-weight:600;
+  display:none;}
+.resp-panel.show{display:block;animation:fadeUp .25s ease}
+.resp-panel.success{background:rgba(0,232,122,.09);border-color:rgba(0,232,122,.35);}
+.resp-panel.error{background:rgba(255,68,85,.09);border-color:rgba(255,68,85,.35);}
+.resp-header{display:flex;align-items:center;gap:8px;padding:10px 14px;
+  border-bottom:1px solid rgba(255,255,255,.07);}
+.resp-panel.success .resp-header{color:var(--success)}
+.resp-panel.error .resp-header{color:var(--error)}
+.resp-header .rh-title{font-weight:800;font-size:.92rem}
+.resp-header .rh-ts{margin-left:auto;font-size:.75rem;color:var(--muted);
+  font-family:monospace;}
+.resp-body{padding:12px 14px;line-height:1.7}
+.resp-row{display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.resp-row:last-child{border-bottom:none}
+.resp-key{color:var(--muted);min-width:90px;font-size:.82rem}
+.resp-val{color:var(--text);font-family:monospace;font-size:.85rem;word-break:break-all;}
+.resp-panel.success .resp-val{color:#b8ffd8}
+.resp-panel.error .resp-val{color:#ffc0c5}
+.resp-raw{background:rgba(0,0,0,.25);border-radius:6px;padding:8px 10px;
+  font-family:monospace;font-size:.78rem;color:var(--muted);
+  margin-top:6px;max-height:120px;overflow-y:auto;word-break:break-all;}
+.dropzone{border:2px dashed rgba(255,170,0,.35);border-radius:var(--radius);
+  padding:28px 20px;text-align:center;cursor:pointer;}
+.dropzone:hover,.dropzone.drag{border-color:var(--accent);background:rgba(255,170,0,.06);}
+.dropzone .dz-icon{font-size:36px;margin-bottom:8px}
+.dropzone p{font-size:.95rem;color:var(--text)}
+.dropzone .dz-hint{font-size:.8rem;color:var(--muted);font-family:monospace;margin-top:4px}
+.file-info{display:none;margin-top:12px;padding:11px 14px;border-radius:var(--radius-sm);
+  background:rgba(0,232,122,.08);border:1.5px solid rgba(0,232,122,.25);
+  color:#b8ffd8;font-size:.88rem;line-height:1.6;}
+.file-info.show{display:block}
+.progress-section{display:none;margin-top:18px}
+.progress-section.show{display:block}
+.prog-bar-wrap{height:8px;background:rgba(255,255,255,.08);border-radius:8px;
+  overflow:hidden;margin:10px 0 14px;}
+.prog-bar-fill{height:100%;width:0%;
+  background:linear-gradient(90deg,var(--primary),var(--accent));
+  border-radius:8px;transition:width .3s;}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{padding:10px;border-radius:var(--radius-sm);background:rgba(0,0,0,.3);
+  border:1.5px solid var(--border);text-align:center;}
+.stat .sl{font-size:.68rem;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--muted);font-weight:700;display:block;margin-bottom:3px}
+.stat .sv{font-size:1.1rem;font-weight:800;font-family:monospace}
+.stat.s-ok .sv{color:var(--success)}
+.stat.s-err .sv{color:var(--error)}
+.bulk-results{display:none;margin-top:16px;max-height:440px;overflow-y:auto;
+  border-radius:var(--radius-sm);border:1.5px solid var(--border);}
+.bulk-results.show{display:block}
+.bulk-results::-webkit-scrollbar{width:6px}
+.bulk-results::-webkit-scrollbar-thumb{background:rgba(255,68,68,.35);border-radius:3px}
+.br-row{display:grid;grid-template-columns:120px 1fr 1fr 220px;gap:8px;
+  padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.05);
+  font-size:.82rem;align-items:center;}
+.br-row:last-child{border-bottom:none}
+.br-row.br-ok{border-left:3px solid var(--success)}
+.br-row.br-err{border-left:3px solid var(--error)}
+.br-row.br-proc{border-left:3px solid var(--accent)}
+.br-uid{font-family:monospace;color:#c0c0e0;font-size:.8rem;font-weight:700}
+.br-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.br-region{color:var(--muted);font-size:.8rem}
+.br-status{text-align:right;font-weight:700;font-size:.75rem;word-break:break-all}
+.br-row.br-ok .br-status{color:var(--success)}
+.br-row.br-err .br-status{color:var(--error)}
+.br-row.br-proc .br-status{color:var(--accent)}
+.live-monitor{background:#05050a;border:1.5px solid rgba(0,232,122,.28);
+  border-radius:var(--radius-sm);padding:12px 14px;margin-top:14px;
+  font-family:'Courier New',monospace;font-size:.82rem;line-height:1.75;
+  max-height:340px;overflow-y:auto;}
+.live-monitor::-webkit-scrollbar{width:6px}
+.live-monitor::-webkit-scrollbar-thumb{background:rgba(0,232,122,.35);border-radius:3px}
+.lm-header{display:flex;align-items:center;gap:8px;padding-bottom:8px;
+  margin-bottom:8px;border-bottom:1px solid rgba(0,232,122,.18);color:#00e87a;
+  font-family:var(--font-display);font-size:.78rem;letter-spacing:1.2px;font-weight:700;
+  position:sticky;top:-12px;background:#05050a;padding-top:2px;z-index:3;}
+.lm-dot{width:8px;height:8px;border-radius:50%;background:#00e87a;
+  box-shadow:0 0 10px #00e87a;animation:pulseDot 1.2s infinite;}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.3}}
+.lm-clear{margin-left:auto;cursor:pointer;padding:2px 8px;border-radius:5px;
+  font-size:.7rem;color:var(--muted);border:1px solid rgba(255,255,255,.12);
+  background:transparent;font-family:var(--font-body);font-weight:700;}
+.lm-clear:hover{color:#ff4455;border-color:#ff4455}
+.lm-line{margin-bottom:1px;word-break:break-all;white-space:pre-wrap}
+.lm-ts{color:#3a3a5a;margin-right:8px}
+.lm-uid{color:#7ec8ff;font-weight:700}
+.lm-ok{color:#00e87a;font-weight:700}
+.lm-err{color:#ff4455;font-weight:700}
+.lm-info{color:#ffbb00}
+.lm-name{color:#ffd966;font-weight:700}
+.lm-region{color:#b8b8ff}
+.lm-time{color:#666;font-style:italic}
+.api-box{background:rgba(0,232,122,.07);border:1.5px solid rgba(0,232,122,.22);
+  border-radius:var(--radius-sm);padding:14px 16px;font-size:.87rem;line-height:1.9;}
+.api-box code{background:rgba(0,0,0,.4);padding:2px 7px;border-radius:4px;
+  color:#00ffa3;font-family:monospace;font-size:.82rem;word-break:break-all;
+  cursor:pointer;}
+.api-box code:hover{background:rgba(0,255,163,.12)}
+.api-label{font-weight:800;color:var(--text);display:block;margin-top:10px;margin-bottom:2px}
+.api-label:first-child{margin-top:0}
+.footer{text-align:center;margin-top:10px;padding:16px;color:var(--muted);
+  font-size:.88rem;border-top:1px solid var(--border);}
+.footer a{color:var(--accent);text-decoration:none;font-weight:800}
+.dl-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.dl-row .btn{flex:1;min-width:180px}
+@media(max-width:580px){
+  .auth-tabs{grid-template-columns:repeat(2,1fr)}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .br-row{grid-template-columns:90px 1fr 130px;gap:5px}
+  .br-region{display:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hdr">
+  <div class="brand">🔥 MAHIR FREE FIRE BIO CHANGER</div>
+  <div class="tagline">Single · Bulk · JWT · UID+Pass · External API</div>
+  <div class="socials">
+    <a class="s-tg" href="https://t.me/MAHIR0208" target="_blank"><i class="fab fa-telegram"></i>Telegram</a>
+    <a class="s-yt" href="https://youtube.com/@MAHIR0208" target="_blank"><i class="fab fa-youtube"></i>YouTube</a>
+    <a class="s-tt" href="https://tiktok.com/@MAHIR0208" target="_blank"><i class="fab fa-tiktok"></i>TikTok</a>
+  </div>
+</div>
+
+<div class="main-tabs">
+  <div class="m-tab on" id="mt-single" onclick="switchMain('single')">
+    <i class="fas fa-user"></i> SINGLE UPDATE
+  </div>
+  <div class="m-tab" id="mt-bulk" onclick="switchMain('bulk')">
+    <i class="fas fa-layer-group"></i> BULK (JSON)
+  </div>
+</div>
+
+<div class="m-pane on" id="mp-single">
+  <div class="card">
+    <div class="card-title"><i class="fas fa-pen-fancy"></i> Bio Editor</div>
+    <div class="ibox">
+      <strong>Game tags:</strong>
+      <code>[b]</code> Bold · <code>[i]</code> Italic · <code>[FF0000]</code> Color
+      — Max <strong>3 lines · 250 chars</strong>
+    </div>
+    <div class="fmt-row">
+      <button class="fmt-btn" onclick="ins('[b]')"><b>B</b> Bold</button>
+      <button class="fmt-btn" onclick="ins('[i]')"><i>I</i> Italic</button>
+      <button class="fmt-btn" onclick="ins('[b][i]')"><b><i>BI</i></b></button>
+      <button class="fmt-btn" onclick="ins('[c]')">⬛ Center</button>
+      <button class="fmt-btn" onclick="ins('[FFFFFF]')">⬜ White</button>
+      <button class="fmt-btn" onclick="clearBio()">✕ Clear</button>
+    </div>
+    <div class="fg">
+      <label class="fl" for="bio-ta">Bio Text</label>
+      <textarea class="fta" id="bio-ta" rows="4"
+        oninput="onBioInput()">[c][b][00BFFF]HEY DER WELCOME TO [FFFFFF]MAHIR [00BFFF]WEB</textarea>
+      <div class="fctr">
+        <span id="lc-ln" class=""></span>
+        <span id="lc-ch" class=""></span>
+      </div>
+    </div>
+    <div class="fg">
+      <label class="fl">Live Preview</label>
+      <div class="preview-wrap" id="bio-preview"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><i class="fas fa-key"></i> Authentication</div>
+    <div class="auth-tabs">
+      <div class="a-tab on" id="at-cred" onclick="switchAuth('cred')"><i class="fas fa-user-lock"></i>UID+Pass</div>
+      <div class="a-tab" id="at-jwt" onclick="switchAuth('jwt')"><i class="fas fa-key"></i>JWT</div>
+      <div class="a-tab" id="at-access" onclick="switchAuth('access')"><i class="fas fa-unlock-alt"></i>Access</div>
+      <div class="a-tab" id="at-eat" onclick="switchAuth('eat')"><i class="fas fa-exchange-alt"></i>EAT</div>
+    </div>
+    <div class="a-pane on" id="ap-cred">
+      <div class="fg">
+        <label class="fl" for="inp-uid">Guest UID</label>
+        <input class="fi" id="inp-uid" type="text" placeholder="Enter UID">
+      </div>
+      <div class="fg">
+        <label class="fl" for="inp-pass">Guest Password</label>
+        <input class="fi" id="inp-pass" type="text" placeholder="Enter Password">
+      </div>
+      <button class="btn btn-primary" id="btn-cred" onclick="singleUpdate('cred')">
+        <span class="btn-spin"></span>
+        <i class="fas fa-rocket btn-icon"></i>
+        <span class="btn-label">UPDATE BIO WITH UID/PASS</span>
+      </button>
+      <div class="resp-panel" id="resp-cred"></div>
+    </div>
+    <div class="a-pane" id="ap-jwt">
+      <div class="fg">
+        <label class="fl" for="inp-jwt">JWT Token</label>
+        <input class="fi" id="inp-jwt" type="text" placeholder="eyJhbGciOi...">
+      </div>
+      <button class="btn btn-primary" id="btn-jwt" onclick="singleUpdate('jwt')">
+        <span class="btn-spin"></span>
+        <i class="fas fa-rocket btn-icon"></i>
+        <span class="btn-label">UPDATE BIO WITH JWT</span>
+      </button>
+      <div class="resp-panel" id="resp-jwt"></div>
+    </div>
+    <div class="a-pane" id="ap-access">
+      <div class="fg">
+        <label class="fl" for="inp-access">Access Token</label>
+        <input class="fi" id="inp-access" type="text" placeholder="Enter access token">
+      </div>
+      <button class="btn btn-primary" id="btn-access" onclick="singleUpdate('access')">
+        <span class="btn-spin"></span>
+        <i class="fas fa-rocket btn-icon"></i>
+        <span class="btn-label">UPDATE BIO WITH ACCESS TOKEN</span>
+      </button>
+      <div class="resp-panel" id="resp-access"></div>
+    </div>
+    <div class="a-pane" id="ap-eat">
+      <div class="ibox" style="background:rgba(255,170,0,.08)">
+        EAT Token = external access token.
+      </div>
+      <div class="fg">
+        <label class="fl" for="inp-eat">EAT Token</label>
+        <input class="fi" id="inp-eat" type="text" placeholder="Enter EAT token">
+      </div>
+      <button class="btn btn-secondary" id="btn-eat-conv" style="margin-bottom:10px" onclick="convertEAT()">
+        <span class="btn-spin"></span>
+        <i class="fas fa-sync-alt btn-icon"></i>
+        <span class="btn-label">CONVERT EAT → ACCESS TOKEN</span>
+      </button>
+      <div class="fg">
+        <label class="fl">Extracted Access Token</label>
+        <div class="tok-display empty" id="eat-extracted">Token will appear here...</div>
+      </div>
+      <button class="btn btn-primary" id="btn-eat-upd" onclick="singleUpdate('eat')" disabled>
+        <span class="btn-spin"></span>
+        <i class="fas fa-rocket btn-icon"></i>
+        <span class="btn-label">UPDATE BIO WITH EXTRACTED TOKEN</span>
+      </button>
+      <div class="resp-panel" id="resp-eat"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><i class="fas fa-plug"></i> GET API — Copy &amp; Use Anywhere</div>
+    <div class="api-box">
+      <span class="api-label">UID &amp; Password</span>
+      <code onclick="copyCode(this)">GET /api/bio?uid=UID&pass=PASS&bio=YOUR_BIO</code>
+      <span class="api-label">JWT</span>
+      <code onclick="copyCode(this)">GET /api/bio?jwt=YOUR_JWT&bio=YOUR_BIO</code>
+      <span class="api-label">Health Check</span>
+      <code onclick="copyCode(this)">GET /health</code>
+    </div>
+  </div>
+</div><!-- /mp-single -->
+
+<div class="m-pane" id="mp-bulk">
+  <div class="card">
+    <div class="card-title"><i class="fas fa-file-code"></i> Upload Accounts JSON</div>
+    <div class="ibox">Format: <code>[{"uid":"123","password":"abc"}, ...]</code></div>
+    <div class="dropzone" id="dz" onclick="document.getElementById('file-in').click()">
+      <div class="dz-icon">📁</div>
+      <p><strong>Click</strong> or <strong>drag &amp; drop</strong> JSON file here</p>
+      <p class="dz-hint">[{"uid":"...","password":"..."}, ...]</p>
+      <input type="file" id="file-in" accept=".json,application/json" hidden>
+    </div>
+    <div class="file-info" id="fi-info"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><i class="fas fa-pen-fancy"></i> Bio Text (applied to all accounts)</div>
+    <div class="fmt-row">
+      <button class="fmt-btn" onclick="insBulk('[b]')"><b>B</b> Bold</button>
+      <button class="fmt-btn" onclick="insBulk('[i]')"><i>I</i> Italic</button>
+      <button class="fmt-btn" onclick="insBulk('[b][i]')"><b><i>BI</i></b></button>
+      <button class="fmt-btn" onclick="insBulk('[c]')">⬛ Center</button>
+      <button class="fmt-btn" onclick="insBulk('[FFFFFF]')">⬜ White</button>
+      <button class="fmt-btn" onclick="clearBulkBio()">✕ Clear</button>
+    </div>
+    <div class="fg">
+      <textarea class="fta" id="bulk-bio" rows="4"
+        >[c][b][00BFFF]POWER OF [FFFFFF]MAHIR [1E90FF]WEB : MAHIR.XO.JE [FFFFFF]</textarea>
+    </div>
+    <button class="btn btn-primary" id="btn-bulk" onclick="startBulk()" disabled>
+      <span class="btn-spin"></span>
+      <i class="fas fa-rocket btn-icon"></i>
+      <span class="btn-label">START BULK UPLOAD (ULTRA FAST ⚡)</span>
+    </button>
+
+    <div class="progress-section" id="prog-sec">
+      <div style="font-size:.78rem;color:var(--accent);letter-spacing:1.5px;font-weight:800;margin-bottom:6px">⚡ PROCESSING (PARALLEL x20)</div>
+      <div class="prog-bar-wrap"><div class="prog-bar-fill" id="prog-fill"></div></div>
+      <div class="stats">
+        <div class="stat"><span class="sl">Total</span><span class="sv" id="st-total">0</span></div>
+        <div class="stat"><span class="sl">Done</span><span class="sv" id="st-done">0</span></div>
+        <div class="stat s-ok"><span class="sl">✅ OK</span><span class="sv" id="st-ok">0</span></div>
+        <div class="stat s-err"><span class="sl">❌ Fail</span><span class="sv" id="st-err">0</span></div>
+      </div>
+    </div>
+
+    <div class="live-monitor" id="live-monitor">
+      <div class="lm-header">
+        <span class="lm-dot"></span>
+        <span>LIVE MONITOR · t.me/MAHIR0208</span>
+        <button class="lm-clear" onclick="lmClear()">CLEAR</button>
+      </div>
+      <div id="lm-log">
+        <div class="lm-line lm-info">▶ Waiting for bulk start...</div>
+      </div>
+    </div>
+
+    <div class="bulk-results" id="bulk-results"></div>
+
+    <div class="dl-row">
+      <a class="btn btn-secondary" href="/download/bd" download>
+        <i class="fas fa-download"></i>
+        <span class="btn-label">DOWNLOAD bd.json</span>
+      </a>
+      <a class="btn btn-secondary" href="/download/ind" download>
+        <i class="fas fa-download"></i>
+        <span class="btn-label">DOWNLOAD ind.json</span>
+      </a>
+    </div>
+  </div>
+</div><!-- /mp-bulk -->
+
+<div class="footer">
+  🔥 Developed by <a href="https://t.me/MAHIR0208" target="_blank">t.me/MAHIR0208</a>
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+let eatAccessToken = '';
+let bulkAccounts = [];
+let bulkRunning = false;
+
+function switchMain(name) {
+  ['single','bulk'].forEach(n => {
+    document.getElementById('mt-'+n).classList.toggle('on', n===name);
+    document.getElementById('mp-'+n).classList.toggle('on', n===name);
+  });
+}
+function switchAuth(name) {
+  ['jwt','cred','access','eat'].forEach(n => {
+    document.getElementById('at-'+n).classList.toggle('on', n===name);
+    document.getElementById('ap-'+n).classList.toggle('on', n===name);
+  });
+}
+function ins(tag) {
+  const ta = document.getElementById('bio-ta');
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.slice(0,s) + tag + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + tag.length;
+  ta.focus(); onBioInput();
+}
+function clearBio() {
+  document.getElementById('bio-ta').value = ''; onBioInput();
+}
+function getBio() { return document.getElementById('bio-ta').value.trim(); }
+function insBulk(tag) {
+  const ta = document.getElementById('bulk-bio');
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.slice(0,s) + tag + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + tag.length;
+  ta.focus();
+}
+function clearBulkBio() { document.getElementById('bulk-bio').value = ''; }
+function lmLog(html) {
+  const log = document.getElementById('lm-log');
+  const ts = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = 'lm-line';
+  line.innerHTML = `<span class="lm-ts">[${ts}]</span>` + html;
+  log.appendChild(line);
+  const monitor = document.getElementById('live-monitor');
+  monitor.scrollTop = monitor.scrollHeight;
+  while (log.children.length > 500) log.removeChild(log.firstChild);
+}
+function lmClear() {
+  document.getElementById('lm-log').innerHTML =
+    '<div class="lm-line lm-info">▶ Monitor cleared. Ready.</div>';
+}
+function onBioInput() { updateCounters(); renderPreview(); }
+function updateCounters() {
+  const v = document.getElementById('bio-ta').value;
+  const lines = v.split('\n').length, chars = v.length;
+  const lc = document.getElementById('lc-ln'), cc = document.getElementById('lc-ch');
+  lc.textContent = lines+'/3 lines';
+  lc.className = lines>3?'e':lines>2?'w':'';
+  cc.textContent = chars+'/250';
+  cc.className = chars>250?'e':chars>230?'w':'';
+}
+function renderPreview() {
+  const raw = document.getElementById('bio-ta').value;
+  const wrap = document.getElementById('bio-preview');
+  if (!raw.trim()) {
+    wrap.innerHTML = '<span style="color:#555">Preview will appear here...</span>';
+    return;
+  }
+  const lines = raw.split('\n');
+  let html = '', bold=false, italic=false, color='#FFFFFF';
+  lines.forEach(line => {
+    let lineHtml = '', idx = 0;
+    const re = /\[([biBIcC]|[0-9A-Fa-f]{6})\]/g;
+    let m;
+    while ((m = re.exec(line)) !== null) {
+      if (m.index > idx) lineHtml += segment(line.slice(idx,m.index), bold, italic, color);
+      const t = m[1].toUpperCase();
+      if (t==='B') bold=true;
+      else if (t==='I') italic=true;
+      else if (t==='C') { }
+      else color='#'+t;
+      idx = m.index + m[0].length;
+    }
+    if (idx < line.length) lineHtml += segment(line.slice(idx), bold, italic, color);
+    html += '<div class="pv-line">'+(lineHtml||'&#8203;')+'</div>';
+  });
+  wrap.innerHTML = html;
+}
+function segment(txt, bold, italic, color) {
+  if (!txt) return '';
+  let st = `color:${color};`;
+  if (bold) st+='font-weight:bold;';
+  if (italic) st+='font-style:italic;';
+  return `<span style="${st}">${txt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`;
+}
+function showResp(panelId, ok, data, raw) {
+  const p = document.getElementById(panelId);
+  p.className = 'resp-panel show ' + (ok?'success':'error');
+  const ts = new Date().toLocaleTimeString();
+  let rows = '';
+  if (ok) {
+    const pairs = [
+      ['Status', data.status||'Updated'],
+      ['Name', data.name||'—'],
+      ['UID', data.uid||'—'],
+      ['Region', data.region||'—'],
+      ['Method', data.login_method||data.method||'—'],
+    ];
+    pairs.forEach(([k,v])=>{
+      rows += `<div class="resp-row"><span class="resp-key">${k}</span><span class="resp-val">${esc(String(v))}</span></div>`;
+    });
+    if (data.server_ascii || data.server_response) {
+      rows += `<div class="resp-raw">${esc((data.server_ascii||data.server_response).slice(0,400))}</div>`;
+    }
+  } else {
+    rows = `<div class="resp-row"><span class="resp-key">Error</span><span class="resp-val">${esc(data.error||data.status||data.message||'Unknown error')}</span></div>`;
+    if (data.server_ascii) rows += `<div class="resp-raw">${esc(data.server_ascii.slice(0,400))}</div>`;
+    if (data.server_response) rows += `<div class="resp-raw">hex: ${esc(data.server_response.slice(0,200))}</div>`;
+  }
+  p.innerHTML = `
+    <div class="resp-header">
+      <span class="rh-icon">${ok?'✅':'❌'}</span>
+      <span class="rh-title">${ok?'Bio Updated Successfully':'Update Failed'}</span>
+      <span class="rh-ts">${ts}</span>
+    </div>
+    <div class="resp-body">${rows}
+      <div style="margin-top:8px;font-size:.78rem;color:var(--muted)">🔥 t.me/MAHIR0208</div>
+    </div>`;
+}
+function hideAllResp() {
+  ['resp-jwt','resp-cred','resp-access','resp-eat'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'resp-panel'; el.innerHTML = '';
+  });
+}
+function btnLoad(id, on) {
+  const b = document.getElementById(id);
+  b.classList.toggle('loading', on);
+  b.disabled = on;
+}
+function validateBio() {
+  const bio = getBio();
+  if (!bio) return [null, 'Please enter bio text'];
+  if (bio.length>250) return [null, 'Bio exceeds 250 characters'];
+  if (bio.split('\n').filter(l=>l.trim()).length>3) return [null, 'Bio exceeds 3 lines'];
+  return [bio, null];
+}
+async function singleUpdate(method) {
+  const [bio, err] = validateBio();
+  if (err) { alert(err); return; }
+  hideAllResp();
+  const fd = new FormData();
+  fd.append('bio', bio);
+  let url, btnId, respId;
+  if (method==='jwt') {
+    const t = document.getElementById('inp-jwt').value.trim();
+    if (!t) { alert('Enter JWT token'); return; }
+    fd.append('jwt', t);
+    url='/direct_update'; btnId='btn-jwt'; respId='resp-jwt';
+  } else if (method==='cred') {
+    const u=document.getElementById('inp-uid').value.trim();
+    const p=document.getElementById('inp-pass').value.trim();
+    if (!u||!p) { alert('Enter UID and Password'); return; }
+    fd.append('uid',u); fd.append('pass',p);
+    url='/bio_upload'; btnId='btn-cred'; respId='resp-cred';
+  } else if (method==='access') {
+    const a=document.getElementById('inp-access').value.trim();
+    if (!a) { alert('Enter access token'); return; }
+    fd.append('access_token',a);
+    url='/update_bio'; btnId='btn-access'; respId='resp-access';
+  } else if (method==='eat') {
+    if (!eatAccessToken) { alert('Convert EAT token first'); return; }
+    fd.append('access_token', eatAccessToken);
+    url='/update_bio'; btnId='btn-eat-upd'; respId='resp-eat';
+  }
+  btnLoad(btnId, true);
+  try {
+    const res = await fetch(url, {method:'POST', body:fd});
+    const data = await res.json();
+    const ok = data.status && String(data.status).toLowerCase().includes('success');
+    showResp(respId, ok, data, JSON.stringify(data));
+    document.getElementById(respId).scrollIntoView({behavior:'smooth',block:'nearest'});
+  } catch(e) {
+    showResp(respId, false, {error:'Network error: '+e.message}, '');
+  } finally {
+    btnLoad(btnId, false);
+  }
+}
+async function convertEAT() {
+  alert('EAT conversion is deprecated. Use UID+Pass.');
+}
+function copyCode(el) {
+  navigator.clipboard.writeText(el.textContent).then(()=>{
+    const orig=el.textContent;
+    el.textContent='Copied!';
+    setTimeout(()=>el.textContent=orig, 1200);
+  });
+}
+document.getElementById('file-in').addEventListener('change', e=>{
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+const dz = document.getElementById('dz');
+dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('drag')});
+dz.addEventListener('dragleave', ()=>dz.classList.remove('drag'));
+dz.addEventListener('drop', e=>{
+  e.preventDefault(); dz.classList.remove('drag');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.json')) { alert('Upload a .json file'); return; }
+  const r=new FileReader();
+  r.onload=e=>{
+    try {
+      const arr=JSON.parse(e.target.result);
+      if (!Array.isArray(arr)) throw new Error('Root must be array');
+      bulkAccounts=arr.filter(a=>a&&(a.uid||a.account_id)&&(a.password||a.pass))
+        .map(a=>({uid:a.uid||a.account_id, password:a.password||a.pass, name:a.name||a.nickname||''}));
+      if (!bulkAccounts.length){alert('No valid accounts found');return;}
+      const fi=document.getElementById('fi-info');
+      fi.innerHTML=`<strong>✅ ${file.name}</strong> — <strong>${bulkAccounts.length}</strong> accounts loaded`;
+      fi.classList.add('show');
+      document.getElementById('btn-bulk').disabled=false;
+      lmLog(`<span class="lm-info">📁 File loaded:</span> <span class="lm-name">${esc(file.name)}</span> · <span class="lm-uid">${bulkAccounts.length}</span> accounts ready`);
+    } catch(err){ alert('Invalid JSON: '+err.message); }
+  };
+  r.readAsText(file);
+}
+async function startBulk() {
+  if (bulkRunning || !bulkAccounts.length) return;
+  const bio = document.getElementById('bulk-bio').value.trim();
+  if (!bio) { alert('Enter bio text'); return; }
+  bulkRunning = true;
+  btnLoad('btn-bulk', true);
+  const total = bulkAccounts.length;
+  let ok = 0, fail = 0, done = 0;
+  const startTs = performance.now();
+  lmClear();
+  lmLog(`<span class="lm-info">▶ BULK STARTED</span> · <span class="lm-name">${total} accounts</span>`);
+  document.getElementById('prog-sec').classList.add('show');
+  document.getElementById('st-total').textContent = total;
+  document.getElementById('st-done').textContent = 0;
+  document.getElementById('st-ok').textContent = 0;
+  document.getElementById('st-err').textContent = 0;
+  document.getElementById('prog-fill').style.width = '0%';
+  const results = document.getElementById('bulk-results');
+  results.innerHTML = '';
+  results.classList.add('show');
+  const rowIds = bulkAccounts.map((acc, i) => {
+    const rowId = 'br-' + i + '-' + Math.random().toString(36).slice(2, 6);
+    addBR(results, rowId, acc.uid, acc.name || '—', '—', '⏳ Queued...', 'br-proc');
+    return rowId;
+  });
+  const CONCURRENCY = Math.min(20, total);
+  let cursor = 0;
+  async function processOne(i) {
+    const acc = bulkAccounts[i];
+    const rowId = rowIds[i];
+    updBR(results, rowId, acc.uid, acc.name || '—', '—', '⏳ Processing...', 'br-proc');
+    const t0 = performance.now();
+    try {
+      const fd = new FormData();
+      fd.append('uid', acc.uid);
+      fd.append('pass', acc.password);
+      fd.append('bio', bio);
+      const res = await fetch('/bio_upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      const dt = ((performance.now() - t0) / 1000).toFixed(2);
+      const isOk = data.status && String(data.status).toLowerCase().includes('success');
+      if (isOk) {
+        ok++;
+        updBR(results, rowId, acc.uid,
+              data.name || acc.name || '—',
+              data.region || '—',
+              '✅ Updated', 'br-ok');
+        lmLog(`<span class="lm-uid">${esc(acc.uid)}</span> <span class="lm-ok">✅ OK</span> · <span class="lm-name">${esc(data.name || '—')}</span> · <span class="lm-region">${esc(data.region || '—')}</span> <span class="lm-time">(${dt}s)</span>`);
+      } else {
+        fail++;
+        const errMsg = data.error || data.status || 'Failed';
+        updBR(results, rowId, acc.uid,
+              data.name || acc.name || '—', '—',
+              '❌ ' + errMsg.slice(0,80), 'br-err');
+        lmLog(`<span class="lm-uid">${esc(acc.uid)}</span> <span class="lm-err">❌ ${esc(errMsg.slice(0,150))}</span> <span class="lm-time">(${dt}s)</span>`);
+      }
+    } catch (e) {
+      fail++;
+      updBR(results, rowId, acc.uid, acc.name || '—', '—',
+            '❌ ' + e.message.slice(0,80), 'br-err');
+      lmLog(`<span class="lm-uid">${esc(acc.uid)}</span> <span class="lm-err">❌ Network: ${esc(e.message)}</span>`);
+    } finally {
+      done++;
+      document.getElementById('st-done').textContent = done;
+      document.getElementById('st-ok').textContent = ok;
+      document.getElementById('st-err').textContent = fail;
+      document.getElementById('prog-fill').style.width = (done / total * 100) + '%';
+    }
+  }
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= total) return;
+      await processOne(i);
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  const totalTime = ((performance.now() - startTs) / 1000).toFixed(2);
+  lmLog(`<span class="lm-info">■ BULK COMPLETE</span> · <span class="lm-ok">✅ ${ok} OK</span> · <span class="lm-err">❌ ${fail} FAIL</span> · <span class="lm-time">total ${totalTime}s</span>`);
+  bulkRunning = false;
+  btnLoad('btn-bulk', false);
+}
+function addBR(wrap, id, uid, name, region, status, cls) {
+  const d=document.createElement('div');
+  d.className='br-row '+cls; d.id=id;
+  d.innerHTML=`<span class="br-uid">${esc(uid)}</span>
+    <span class="br-name">${esc(name||'—')}</span>
+    <span class="br-region">${esc(region)}</span>
+    <span class="br-status">${esc(status)}</span>`;
+  wrap.appendChild(d);
+}
+function updBR(wrap, id, uid, name, region, status, cls) {
+  const d=document.getElementById(id); if(!d) return;
+  d.className='br-row '+cls;
+  d.innerHTML=`<span class="br-uid">${esc(uid)}</span>
+    <span class="br-name">${esc(name||'—')}</span>
+    <span class="br-region">${esc(region)}</span>
+    <span class="br-status">${esc(status)}</span>`;
+}
+function esc(s){
+  return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+document.addEventListener('DOMContentLoaded',()=>{ onBioInput(); });
+</script>
+</body>
+</html>'''
+
+
+# ====== ROUTES ======
+@app.route("/", methods=["GET"])
+def home():
+    return make_response(HTML_PAGE, 200, {'Content-Type':'text/html; charset=utf-8'})
+
+@app.route("/health", methods=["GET"])
+def health():
+    return _jsonify({"status":"ok","service":"MAHIR Free Fire Bio Changer","version":"3.0"})
+
+@app.route("/direct_update", methods=["POST"])
+def direct_update():
+    jwt_token = request.form.get("jwt") or request.args.get("jwt")
+    bio = request.form.get("bio") or request.args.get("bio")
+    if not jwt_token: return _jsonify({"status":"Missing JWT token","error":"Missing JWT token"})
+    if not bio:       return _jsonify({"status":"Missing bio","error":"Missing bio"})
+    result = upload_bio_request(jwt_token, bio)
+    uid, name, region, _ = decode_jwt_info(jwt_token)
+    if result["status"]=="success":
+        return _jsonify({"status":"Bio updated successfully!",
+            "uid": str(uid) if uid else None, "name": name, "region": region,
+            "server_response": result.get("server_response","N/A"),
+            "server_ascii": result.get("server_ascii","")})
+    return _jsonify({"status":"Bio update failed",
+                     "error": result.get("server_ascii") or result.get("server_response","Unknown error"),
+                     "server_ascii": result.get("server_ascii",""),
+                     "server_response": result.get("server_response","")})
+
+@app.route("/bio_upload", methods=["POST"])
+def bio_upload():
+    uid = request.form.get("uid") or request.args.get("uid")
+    password = request.form.get("pass") or request.args.get("pass")
+    bio = request.form.get("bio") or request.args.get("bio")
+    if not (uid and password and bio):
+        return _jsonify({"status":"Missing uid/pass/bio","error":"Missing uid/pass/bio"})
+
+    jwt_token, err, meta = resolve_jwt(uid=uid, password=password)
+    if err:
+        return _jsonify({"status":err,"error":err})
+
+    result = upload_bio_request(jwt_token, bio)
+    region = meta.get("region")
+    name = meta.get("name")
+    account_id = meta.get("account_id")
+
+    if result["status"]=="success":
+        try:
+            append_account_to_region_json(
+                uid=uid, password=password, bio=bio,
+                jwt_token=jwt_token, region=region,
+                name=name, account_id=account_id,
+                access_token=meta.get("access_token"),
+                open_id=meta.get("open_id")
+            )
+        except Exception as e:
+            print(f"[JSON SAVE ERROR] {e}")
+        return _jsonify({"status":"Bio updated successfully!",
+            "uid": meta.get("uid"), "name": name,
+            "region": region,
+            "server_response": result.get("server_response","N/A"),
+            "server_ascii": result.get("server_ascii","")})
+
+    return _jsonify({
+        "status":"Bio update failed",
+        "error": result.get("server_ascii") or result.get("server_response","Unknown error"),
+        "server_ascii": result.get("server_ascii",""),
+        "server_response": result.get("server_response","")
+    })
+
+@app.route("/update_bio", methods=["POST"])
+def update_bio():
+    access_token = request.form.get("access_token") or request.args.get("access_token")
+    bio = request.form.get("bio") or request.args.get("bio")
+    if not access_token: return _jsonify({"status":"Missing access token","error":"Missing access token"})
+    if not bio:          return _jsonify({"status":"Missing bio","error":"Missing bio"})
+    jwt_token, err, meta = resolve_jwt(access_token=access_token)
+    if err: return _jsonify({"status":err,"error":err})
+    result = upload_bio_request(jwt_token, bio)
+    if result["status"]=="success":
+        return _jsonify({"status":"Bio updated successfully!",
+            "uid": meta.get("uid"), "name": meta.get("name"),
+            "region": meta.get("region"),
+            "server_response": result.get("server_response","N/A"),
+            "server_ascii": result.get("server_ascii","")})
+    return _jsonify({"status":"Bio update failed",
+                     "error": result.get("server_ascii") or result.get("server_response","Unknown error"),
+                     "server_ascii": result.get("server_ascii",""),
+                     "server_response": result.get("server_response","")})
+
+@app.route("/extract_token", methods=["POST"])
+def extract_token():
+    return _jsonify({"success": False, "error": "Deprecated — use UID+Pass"})
+
+@app.route("/bio", methods=["GET", "POST"])
+@app.route("/api/bio", methods=["GET", "POST"])
+def combined_bio():
+    r = request.args if request.method=="GET" else request.form
+    bio = r.get("bio")
+    jwt_token = r.get("jwt")
+    uid = r.get("uid") or r.get("account_id")
+    password = r.get("pass") or r.get("password")
+    if not bio:
+        return _jsonify({"status":"failed","message":"Missing 'bio' parameter"}, 400)
+    jwt_final, err, meta = resolve_jwt(
+        jwt_token=jwt_token, uid=uid, password=password)
+    if err:
+        return _jsonify({"status":"failed","message":err}, 400)
+    result = upload_bio_request(jwt_final, bio)
+    return _jsonify({
+        "status": result["status"], "code": result["code"], "bio": bio,
+        "uid": meta.get("uid"), "name": meta.get("name"),
+        "region": meta.get("region"), "login_method": meta.get("method"),
+        "open_id": meta.get("open_id"),
+        "server_response": result.get("server_response","N/A"),
+        "server_ascii": result.get("server_ascii","")
+    })
+
+@app.route("/download/bd", methods=["GET"])
+def download_bd():
+    if not os.path.exists(BD_JSON):
+        save_json_list(BD_JSON, [])
+    return send_file(BD_JSON, mimetype="application/json",
+                     as_attachment=True, download_name="bd.json")
+
+@app.route("/download/ind", methods=["GET"])
+def download_ind():
+    if not os.path.exists(IND_JSON):
+        save_json_list(IND_JSON, [])
+    return send_file(IND_JSON, mimetype="application/json",
+                     as_attachment=True, download_name="ind.json")
+
+@app.route("/view/<region>", methods=["GET"])
+def view_region(region):
+    region = region.lower()
+    if region == "bd":
+        path = BD_JSON
+    elif region in ("ind", "india"):
+        path = IND_JSON
+    else:
+        return _jsonify({"status":"failed","message":"region must be bd or ind"}, 400)
+    return _jsonify({"status":"ok", "region": region, "accounts": load_json_list(path)})
+
+# ====== Vercel Handler ======
+handler = app
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
