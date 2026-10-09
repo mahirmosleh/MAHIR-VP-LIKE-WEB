@@ -7,3 +7,5 @@ aiohttp
 urllib3
 protobuf
 orjson
+cryptography
+cachetools

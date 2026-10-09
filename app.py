@@ -32,13 +32,16 @@
 #    POST   /master/api/unblock
 #    GET    /master/api/player-info?uid=
 #    GET    /master/api/info-store
+#    GET    /master/api/info-store/history?uid=
 #    POST   /master/api/info-store/refresh?uid=
+#    GET    /master/api/auto-with-info
 # ==========================================================
 
 import os
 import sys
 import json
 import time
+import base64
 import binascii
 import asyncio
 import threading
@@ -100,10 +103,9 @@ AUTO_LIKE_HOUR    = 4
 AUTO_LIKE_MINUTE  = 10
 DAILY_LIMIT_USER  = 1
 
-# 🆕 Info API
-INFO_API_BASE     = "https://mahir-info-api.vercel.app"
-INFO_API_INFO_URL = INFO_API_BASE + "/info?uid={uid}"
-INFO_API_DUO_URL  = INFO_API_BASE + "/duo?uid={uid}"
+# 🆕 Direct Info fetch — no external API
+INFO_BOT_UID      = "4225611772"
+INFO_BOT_PW       = "BY_UNKNOWN-ID4JZZPL8-GHOST"   # ← change if needed
 
 # 🆕 CDN for avatars
 ICON_CDN_BASE     = "https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG"
@@ -133,20 +135,153 @@ EDITABLE_FILES = [
 ]
 
 CONFIG_RO_PATH = os.path.join(BASE_DIR, "keys.json")
-CONFIG_RW_PATH = os.path.join(BASE_DIR, "keys_rw.json")  # persistent on Render
+CONFIG_RW_PATH = os.path.join(BASE_DIR, "keys_rw.json")
 USAGE_PATH     = os.path.join(BASE_DIR, "mahir_usage.json")
 USAGE_DETAIL_PATH = os.path.join(BASE_DIR, "mahir_usage_detail.json")
 BLOCKED_UIDS_PATH = os.path.join(BASE_DIR, "mahir_blocked_uids.json")
 AUTO_FILE      = os.path.join(BASE_DIR, "auto.txt")
 
-# 🆕 Info store (stored per-UID daily snapshot)
+# 🆕 Info store (per-UID daily snapshot + history)
 INFO_STORE_PATH   = os.path.join(BASE_DIR, "mahir_info_store.json")
+INFO_HISTORY_PATH = os.path.join(BASE_DIR, "mahir_info_history.json")
 INFO_STORE_LOCK   = RLock()
 
 config_lock = RLock()
 usage_lock  = RLock()
 jwt_lock    = RLock()
 file_lock   = RLock()
+
+# ============================================================
+#  🆕 INFO — DIRECT FETCH (from xInFo.py logic, no external API)
+# ============================================================
+try:
+    import AccountPersonalShow_pb2 as apsPb
+    import main_pb2 as mPb
+    from google.protobuf import json_format
+    from cachetools import TTLCache
+    from xH import gJwt
+    _INFO_DIRECT_AVAILABLE = True
+except Exception as _info_import_err:
+    print(f"[INFO] direct modules unavailable: {_info_import_err}")
+    _INFO_DIRECT_AVAILABLE = False
+
+# Token cache for info bot (4h)
+try:
+    _info_jwt_cache = TTLCache(maxsize=10, ttl=4 * 60 * 60)
+    _info_data_cache = TTLCache(maxsize=200, ttl=300)
+except Exception:
+    _info_jwt_cache = {}
+    _info_data_cache = {}
+
+_OB_VERSION_CACHE = {"version": None, "timestamp": 0}
+_OB_VERSION_TTL = 3600
+
+
+def _get_ob_version():
+    """Fetch latest OB version (cached 1h)"""
+    now = time.time()
+    if (_OB_VERSION_CACHE["version"]
+            and (now - _OB_VERSION_CACHE["timestamp"]) < _OB_VERSION_TTL):
+        return _OB_VERSION_CACHE["version"]
+    try:
+        url = ("https://version.ggwhitehawk.com//live/ver.php?version=1.3.0"
+               "&lang=ar&device=android&channel=android&appstore=googleplay"
+               "&region=ME&whitelist_version=1.3.0&whitelist_sp_version=1.0.0"
+               "&device_name=google%20G011A&device_CPU=ARMv7%20VFPv3%20NEON%20VMH"
+               "&device_GPU=Adreno%20(TM)%20640&device_mem=1993")
+        r = requests.get(url, timeout=10, verify=False)
+        data = r.json()
+        ob = data.get("latest_release_version")
+        if ob:
+            _OB_VERSION_CACHE["version"] = ob
+            _OB_VERSION_CACHE["timestamp"] = now
+            return ob
+    except Exception as e:
+        print(f"[INFO] ob version err: {e}")
+    return "ob"
+
+
+def _get_info_token():
+    """Bot JWT for info fetches"""
+    key = "jwt_info"
+    try:
+        if key in _info_jwt_cache:
+            return _info_jwt_cache[key]
+    except Exception:
+        pass
+    tok = gJwt(INFO_BOT_UID, INFO_BOT_PW)
+    try:
+        _info_jwt_cache[key] = tok
+    except Exception:
+        pass
+    return tok
+
+
+def _enc_info_payload(uid):
+    """Encrypt GetPlayerPersonalShow payload (AES-CBC)"""
+    mK = base64.b64decode('WWcmdGMlREV1aDYlWmNeOA==')
+    mIV = base64.b64decode('Nm95WkRyMjJFM3ljaGpNJQ==')
+    m = mPb.GetPlayerPersonalShow()
+    m.a = int(uid)
+    m.b = 7
+    raw = m.SerializeToString()
+    n = AES.block_size - (len(raw) % AES.block_size)
+    return AES.new(mK, AES.MODE_CBC, mIV).encrypt(raw + bytes([n] * n))
+
+
+def _fetch_info_direct(uid: str, timeout: int = 30) -> dict:
+    """Direct xInFo-style info fetch — NO external API"""
+    if not _INFO_DIRECT_AVAILABLE:
+        return {}
+
+    # cache hit
+    ck = str(uid)
+    try:
+        if ck in _info_data_cache:
+            return _info_data_cache[ck]
+    except Exception:
+        pass
+
+    try:
+        tok = _get_info_token()
+        payload = _enc_info_payload(uid)
+        headers = {
+            "Host": "clientbp.ppmainecoonghj.com",
+            "X-Unity-Version": "2018.4.12f1",
+            "Accept": "*/*",
+            "Authorization": f"Bearer {tok}",
+            "ReleaseVersion": _get_ob_version(),
+            "X-GA": "v1 1",
+            "X-GA-SV": "1789535859",
+            "Accept-Encoding": "deflate, gzip",
+            "Content-Type": "application/octet-stream",
+            "User-Agent": "UnityPlayer/2018.4.12f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)",
+            "Connection": "keep-alive",
+        }
+        r = requests.post(
+            "https://clientbp.ppmainecoonghj.com/GetPlayerPersonalShow",
+            data=payload, headers=headers, verify=False, timeout=timeout,
+        )
+        if r.status_code != 200:
+            print(f"[INFO] {uid}: http {r.status_code}")
+            return {}
+        proto = apsPb.AccountPersonalShowInfo()
+        proto.ParseFromString(r.content)
+        data = json.loads(json_format.MessageToJson(proto))
+        try:
+            _info_data_cache[ck] = data
+        except Exception:
+            pass
+        return data
+    except Exception as e:
+        print(f"[INFO] {uid} err: {e}")
+        # clear token — may be expired
+        try:
+            _info_jwt_cache.clear()
+        except Exception:
+            pass
+        return {}
+
 
 # ============================================================
 #  CONFIG LOADER
@@ -341,7 +476,7 @@ def unblock_uid(uid: str):
 
 
 # ============================================================
-#  🆕 INFO STORE (per-UID daily snapshot)
+#  🆕 INFO STORE + HISTORY (per-UID daily snapshot DB)
 # ============================================================
 def _load_info_store():
     with INFO_STORE_LOCK:
@@ -363,8 +498,28 @@ def _save_info_store(data):
             pass
 
 
+def _load_info_history():
+    with INFO_STORE_LOCK:
+        if not os.path.exists(INFO_HISTORY_PATH):
+            return {}
+        try:
+            with open(INFO_HISTORY_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+
+def _save_info_history(data):
+    with INFO_STORE_LOCK:
+        try:
+            with open(INFO_HISTORY_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+
 def _normalize_info(info: dict) -> dict:
-    """শুধু প্রয়োজনীয় ফিল্ডগুলো বের করে normalized dict"""
+    """Extract only the essential fields into a normalized dict"""
     basic   = info.get("basicInfo", {}) or {}
     clan    = info.get("clanBasicInfo", {}) or {}
     captain = info.get("captainBasicInfo", {}) or {}
@@ -397,45 +552,70 @@ def _normalize_info(info: dict) -> dict:
         "lastLogin": basic.get("lastLoginDecoded"),
         "created": basic.get("createdDecoded"),
         "accountAge": basic.get("accountAge"),
-        "raw": info,
     }
 
 
 def fetch_live_info(uid: str, timeout: int = 20) -> dict:
-    """Info API থেকে লাইভ ডেটা আনে"""
-    try:
-        r = requests.get(INFO_API_INFO_URL.format(uid=uid),
-                         timeout=timeout, verify=False)
-        if r.status_code != 200:
-            return {}
-        data = r.json()
-        if not isinstance(data, dict):
-            return {}
-        return data
-    except Exception as e:
-        print(f"[INFO-API] {uid} err: {e}")
-        return {}
+    """Direct fetch — no external API"""
+    return _fetch_info_direct(uid, timeout=timeout)
 
 
-def get_or_refresh_info(uid: str, force: bool = False) -> dict:
+def _append_history(uid: str, date: str, snapshot: dict, source: str,
+                    likes_given: int = 0):
+    """Store per-day snapshot into history DB"""
+    uid = str(uid)
+    hist = _load_info_history()
+    uid_hist = hist.setdefault(uid, {})
+    day_entry = uid_hist.setdefault(date, {
+        "date": date,
+        "sources": [],
+        "snapshots": [],
+    })
+
+    entry = {
+        "at": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
+        "source": source,      # "auto_like" | "user_like" | "manual_refresh"
+        "likes_given": likes_given,
+        "snapshot": snapshot,
+    }
+    day_entry["snapshots"].append(entry)
+    if source not in day_entry["sources"]:
+        day_entry["sources"].append(source)
+    day_entry["last_at"] = entry["at"]
+
+    _save_info_history(hist)
+
+
+def get_or_refresh_info(uid: str, force: bool = False,
+                        source: str = "manual",
+                        likes_given: int = 0) -> dict:
     """
-    প্রতিদিন একবার UID-এর info API থেকে আনা হয় এবং store-এ সেভ হয়।
-    force=True হলে জোর করে refresh।
+    Once per day fetches UID info and stores in DB.
+    Always appends to history if source != 'manual_readonly'.
     """
     uid = str(uid)
     today = _today_str()
     store = _load_info_store()
-
     entry = store.get(uid, {})
     last_date = entry.get("date")
 
+    # Daily cache: use stored if same day and normalized exists
     if (not force) and last_date == today and entry.get("normalized"):
+        # still log a read event
+        if source != "manual_readonly":
+            _append_history(uid, today, entry.get("normalized", {}),
+                            source, likes_given)
         return entry
 
     live = fetch_live_info(uid)
     if not live:
-        # লাইভ ডেটা না পেলে পুরনো ডেটাই ফেরত দিই
-        return entry or {"uid": uid, "date": today, "normalized": {}, "raw": {}}
+        # fall back to old data
+        if entry:
+            if source != "manual_readonly":
+                _append_history(uid, today, entry.get("normalized", {}),
+                                f"{source}_stale", likes_given)
+            return entry
+        return {"uid": uid, "date": today, "normalized": {}, "raw": {}}
 
     norm = _normalize_info(live)
     new_entry = {
@@ -444,14 +624,20 @@ def get_or_refresh_info(uid: str, force: bool = False) -> dict:
         "fetched_at": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
         "normalized": norm,
         "raw": live,
+        "last_source": source,
+        "last_likes_given": likes_given,
     }
     store[uid] = new_entry
     _save_info_store(store)
+
+    # append history
+    if source != "manual_readonly":
+        _append_history(uid, today, norm, source, likes_given)
+
     return new_entry
 
 
 def diff_info(old_norm: dict, new_norm: dict) -> dict:
-    """দুটি normalized dict-এর মধ্যে পার্থক্য বের করে"""
     if not old_norm:
         return {"changed": False, "fields": {}}
     changed = {}
@@ -751,8 +937,11 @@ def do_like(uid, server_name, tier="user"):
     if not tokens:
         return {"error": "Failed to generate JWT tokens."}
 
-    # 🆕 Step 1: daily info snapshot (প্রতিদিন শুধু একবার)
-    snapshot_before = get_or_refresh_info(uid, force=False)
+    # 🆕 Step 1: daily snapshot BEFORE
+    snapshot_before = get_or_refresh_info(
+        uid, force=False,
+        source="user_like" if tier != "auto" else "auto_like",
+    )
 
     token = tokens[0]
     encrypted = enc(uid)
@@ -780,8 +969,12 @@ def do_like(uid, server_name, tier="user"):
         record_like_usage(api_key, str(after["uid"]), like_given,
                           server_name, str(after["name"]))
 
-    # 🆕 Step 2: after like → info check → diff with stored
-    snapshot_after = get_or_refresh_info(uid, force=True)
+    # 🆕 Step 2: snapshot AFTER + history store
+    snapshot_after = get_or_refresh_info(
+        uid, force=True,
+        source="user_like" if tier != "auto" else "auto_like",
+        likes_given=like_given,
+    )
     old_norm = (snapshot_before or {}).get("normalized", {}) or {}
     new_norm = (snapshot_after or {}).get("normalized", {}) or {}
     diff = diff_info(old_norm, new_norm)
@@ -800,7 +993,6 @@ def do_like(uid, server_name, tier="user"):
         "quota_remaining": remaining,
         "Owner": OWNER_HANDLE,
         "status": 1 if like_given > 0 else 2,
-        # 🆕 info store fields
         "info_snapshot": new_norm,
         "info_avatar": new_norm.get("avatarUrl"),
         "info_changed": diff["changed"],
@@ -811,12 +1003,13 @@ def do_like(uid, server_name, tier="user"):
 
 
 # ============================================================
-#  AUTO-LIKE
+#  AUTO-LIKE (with DB snapshot per UID)
 # ============================================================
 def do_auto_like_now():
     print(f"\n[AUTO-LIKE] start {datetime.now():%Y-%m-%d %H:%M:%S}")
     targets = load_auto_targets()
     total = 0
+    results_summary = []
     for srv, uids in targets.items():
         if not uids:
             continue
@@ -831,20 +1024,51 @@ def do_auto_like_now():
                     print(f"[AUTO-LIKE] {srv} {uid} SKIPPED (blocked)")
                     continue
                 try:
-                    # 🆕 daily snapshot before
-                    snap_before = get_or_refresh_info(uid, force=False)
+                    # snapshot BEFORE
+                    snap_before = get_or_refresh_info(uid, force=False,
+                                                      source="auto_like")
+                    old_norm = (snap_before or {}).get("normalized", {}) or {}
+
                     ok = send_likes_from_all_tokens(uid, srv, url, tokens)
                     total += ok
-                    # 🆕 after → refresh + diff
-                    snap_after = get_or_refresh_info(uid, force=True)
-                    d = diff_info(snap_before.get("normalized", {}),
-                                  snap_after.get("normalized", {}))
+
+                    # snapshot AFTER → always write to DB
+                    snap_after = get_or_refresh_info(uid, force=True,
+                                                     source="auto_like",
+                                                     likes_given=ok)
+                    new_norm = (snap_after or {}).get("normalized", {}) or {}
+                    d = diff_info(old_norm, new_norm)
+
+                    results_summary.append({
+                        "server": srv,
+                        "uid": uid,
+                        "likes_sent": ok,
+                        "nickname": new_norm.get("nickname"),
+                        "likes_total": new_norm.get("likes"),
+                        "avatarUrl": new_norm.get("avatarUrl"),
+                        "info_changed": d["changed"],
+                        "info_diff": d["fields"],
+                        "at": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
+                    })
                     print(f"[AUTO-LIKE] {srv} {uid} → {ok} | info_changed={d['changed']}")
                 except Exception as e:
                     print(f"[AUTO-LIKE] {srv} {uid} err: {e}")
                 time.sleep(0.5)
         except Exception as e:
             print(f"[AUTO-LIKE] {srv} err: {e}")
+
+    # save summary for master panel
+    try:
+        summary_path = os.path.join(BASE_DIR, "mahir_auto_summary.json")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "last_run": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_likes_sent": total,
+                "results": results_summary,
+            }, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[AUTO-LIKE] summary save err: {e}")
+
     print(f"[AUTO-LIKE] done. total={total}\n")
     return total
 
@@ -952,7 +1176,7 @@ def route_health():
         "tg": TELEGRAM,
         "tiktok": TIKTOK,
         "jwt_api": JWT_API_BASE,
-        "info_api": INFO_API_BASE,
+        "info_mode": "direct (xInFo logic)" if _INFO_DIRECT_AVAILABLE else "unavailable",
         "icon_cdn": ICON_CDN_BASE,
         "servers": list(SERVER_ACCOUNT_FILES.keys()),
         "auto_like_at": f"{AUTO_LIKE_HOUR:02d}:{AUTO_LIKE_MINUTE:02d}",
@@ -1080,12 +1304,18 @@ def master_files():
                 pass
         files.append({"name": name, "exists": exists, "size": size, "lines": lines})
 
-    # 🆕 info store file
+    # info store files
     files.append({
         "name": "mahir_info_store.json",
         "exists": os.path.exists(INFO_STORE_PATH),
         "size": os.path.getsize(INFO_STORE_PATH) if os.path.exists(INFO_STORE_PATH) else 0,
         "lines": len(_load_info_store()),
+    })
+    files.append({
+        "name": "mahir_info_history.json",
+        "exists": os.path.exists(INFO_HISTORY_PATH),
+        "size": os.path.getsize(INFO_HISTORY_PATH) if os.path.exists(INFO_HISTORY_PATH) else 0,
+        "lines": len(_load_info_history()),
     })
     return _jsonify({"files": files})
 
@@ -1390,6 +1620,7 @@ def master_stats():
         "blocked_uids": sorted(_load_blocked()),
         "blocked_count": len(_load_blocked()),
         "info_store_count": len(_load_info_store()),
+        "info_history_count": len(_load_info_history()),
     })
 
 
@@ -1480,7 +1711,7 @@ def master_unblock_uid():
     return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
 
 
-# ---------- 🆕 Player full info with stored snapshot ----------
+# ---------- Player full info (direct + stored snapshot + history) ----------
 @app.get("/master/api/player-info")
 def master_player_info():
     key = request.args.get("key", "").strip()
@@ -1491,34 +1722,22 @@ def master_player_info():
     if not uid.isdigit():
         return jsonify({"error": "valid uid required"}), 400
 
-    # পুরনো stored info
-    stored_entry = get_or_refresh_info(uid, force=False)
+    # stored snapshot
+    stored_entry = get_or_refresh_info(uid, force=False,
+                                       source="manual_readonly")
     stored_norm = stored_entry.get("normalized", {}) or {}
 
-    # লাইভ info
+    # live direct fetch
     live_info = fetch_live_info(uid)
     if not live_info:
-        return jsonify({"error": "info api failed"}), 502
+        return jsonify({"error": "info fetch failed"}), 502
 
     live_norm = _normalize_info(live_info)
-
-    # diff: live vs stored
     diff = diff_info(stored_norm, live_norm)
 
-    # duo info
-    duo = None
-    try:
-        dr = requests.get(INFO_API_DUO_URL.format(uid=uid),
-                          timeout=12, verify=False)
-        if dr.status_code == 200:
-            duo_json = dr.json()
-            if duo_json.get("ok"):
-                duo = duo_json.get("data")
-            else:
-                duo = {"status": "none",
-                       "msg": duo_json.get("msg", "No Dynamic Duo")}
-    except Exception:
-        duo = None
+    # history
+    hist_all = _load_info_history()
+    uid_history = hist_all.get(str(uid), {})
 
     today = _today_str()
     usage = _load_usage_detail()
@@ -1526,10 +1745,7 @@ def master_player_info():
     for api_key, days in usage.items():
         day = days.get(today, {})
         if str(uid) in day:
-            today_likes.append({
-                "api_key": api_key,
-                **day[str(uid)]
-            })
+            today_likes.append({"api_key": api_key, **day[str(uid)]})
 
     card = {
         "uid": live_norm.get("uid") or uid,
@@ -1553,22 +1769,26 @@ def master_player_info():
         "accountAge": live_norm.get("accountAge"),
         "signature": live_norm.get("signature"),
         "creditScore": live_norm.get("creditScore"),
-        "duo": duo,
         "today_like_activity": today_likes,
         "is_blocked": is_uid_blocked(str(uid)),
-        # 🆕 stored snapshot + diff
+        # stored snapshot + diff
         "stored_snapshot": stored_norm,
         "stored_date": stored_entry.get("date"),
         "stored_fetched_at": stored_entry.get("fetched_at"),
+        "stored_last_source": stored_entry.get("last_source"),
+        "stored_last_likes_given": stored_entry.get("last_likes_given"),
         "live_snapshot": live_norm,
         "info_changed": diff["changed"],
         "info_diff": diff["fields"],
+        # history
+        "history": uid_history,
+        "history_days": list(uid_history.keys()),
         "full": live_info,
     }
     return _jsonify(card)
 
 
-# ---------- 🆕 Info store endpoints ----------
+# ---------- Info store endpoints ----------
 @app.get("/master/api/info-store")
 def master_info_store():
     key = request.args.get("key", "").strip()
@@ -1587,9 +1807,38 @@ def master_info_store():
             "uid": u,
             "date": e.get("date"),
             "fetched_at": e.get("fetched_at"),
+            "last_source": e.get("last_source"),
+            "last_likes_given": e.get("last_likes_given"),
             "nickname": norm.get("nickname"),
             "likes": norm.get("likes"),
             "avatarUrl": norm.get("avatarUrl"),
+        })
+    return _jsonify({"count": len(summary), "entries": summary})
+
+
+@app.get("/master/api/info-store/history")
+def master_info_history():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+
+    uid = request.args.get("uid", "").strip()
+    hist = _load_info_history()
+
+    if uid:
+        return _jsonify({"uid": uid, "history": hist.get(uid, {})})
+
+    # summary all
+    summary = []
+    for u, days in hist.items():
+        total_days = len(days)
+        total_snaps = sum(len(d.get("snapshots", [])) for d in days.values())
+        last_date = max(days.keys()) if days else None
+        summary.append({
+            "uid": u,
+            "days": total_days,
+            "snapshots": total_snaps,
+            "last_date": last_date,
         })
     return _jsonify({"count": len(summary), "entries": summary})
 
@@ -1605,8 +1854,62 @@ def master_info_store_refresh():
     if not uid.isdigit():
         return jsonify({"error": "valid uid required"}), 400
 
-    entry = get_or_refresh_info(uid, force=True)
+    entry = get_or_refresh_info(uid, force=True, source="manual_refresh")
     return _jsonify({"ok": True, "entry": entry})
+
+
+# ---------- 🆕 Auto-like + Info combined view ----------
+@app.get("/master/api/auto-with-info")
+def master_auto_with_info():
+    """
+    Returns auto.txt targets with their latest DB snapshot & last auto-run summary.
+    Perfect for showing in master panel: 'auto list + info + last likes'.
+    """
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+
+    targets = load_auto_targets()
+    store = _load_info_store()
+
+    out = {}
+    for srv, uids in targets.items():
+        rows = []
+        for uid in uids:
+            e = store.get(str(uid), {})
+            norm = e.get("normalized", {}) or {}
+            rows.append({
+                "uid": uid,
+                "nickname": norm.get("nickname"),
+                "likes": norm.get("likes"),
+                "level": norm.get("level"),
+                "region": norm.get("region"),
+                "avatarUrl": norm.get("avatarUrl"),
+                "headPic": norm.get("headPic"),
+                "clanName": norm.get("clanName"),
+                "is_blocked": is_uid_blocked(str(uid)),
+                "info_date": e.get("date"),
+                "info_fetched_at": e.get("fetched_at"),
+                "last_source": e.get("last_source"),
+                "last_likes_given": e.get("last_likes_given"),
+            })
+        out[srv] = rows
+
+    # last summary
+    summary = {}
+    try:
+        summary_path = os.path.join(BASE_DIR, "mahir_auto_summary.json")
+        if os.path.exists(summary_path):
+            with open(summary_path, "r", encoding="utf-8") as f:
+                summary = json.load(f)
+    except Exception:
+        summary = {}
+
+    return _jsonify({
+        "auto_with_info": out,
+        "total_uids": sum(len(v) for v in out.values()),
+        "last_run_summary": summary,
+    })
 
 
 # ============================================================
