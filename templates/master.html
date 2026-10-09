@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  :root{--bg:#08090c;--bg-2:#0d0f14;--surface:#111318;--surface-2:#161920;--border:#1f232d;--border-hi:#2d3340;--text:#e8eaf0;--text-dim:#8b93a7;--text-mute:#5a6273;--accent:#7c5cff;--accent-hi:#9d87ff;--success:#22c55e;--danger:#ef4444;--warning:#f59e0b;--info:#06b6d4}
+  :root{--bg:#08090c;--bg-2:#0d0f14;--surface:#111318;--surface-2:#161920;--border:#1f232d;--border-hi:#2d3340;--text:#e8eaf0;--text-dim:#8b93a7;--text-mute:#5a6273;--accent:#7c5cff;--accent-hi:#9d87ff;--success:#22c55e;--danger:#ef4444;--warning:#f59e0b;--info:#06b6d4;--gold:#fbbf24}
   html,body{height:100%}
   body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
   .ambient{position:fixed;inset:0;pointer-events:none;z-index:0}
@@ -90,7 +90,7 @@
   .stat-card .value{font-size:22px;font-weight:800;letter-spacing:-.03em;font-family:'JetBrains Mono',monospace}
   .stat-card .value.accent{background:linear-gradient(135deg,#7c5cff,#06b6d4);-webkit-background-clip:text;background-clip:text;color:transparent}
   .stat-card .value.green{color:var(--success)}
-  .stat-card .value.gold{color:#fbbf24}
+  .stat-card .value.gold{color:var(--gold)}
   .stat-card .value.info{color:var(--info)}
   .stat-card .value.danger{color:var(--danger)}
   .server-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
@@ -126,47 +126,102 @@
   .uid-link:hover{color:#fff}
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(6px)}
   .modal-bg.show{display:flex}
-  .modal{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:16px;max-width:560px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.6)}
-  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+  .modal{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:16px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.6)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:2}
   .modal-body{padding:20px}
   .player-card{background:#0a0a0c;border-radius:12px;overflow:hidden;border:1px solid #1a1a22}
-  .player-banner{height:90px;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);position:relative}
-  .player-avatar-wrap{position:absolute;bottom:-36px;left:20px}
-  .player-avatar{width:72px;height:72px;border-radius:14px;border:3px solid #0a0a0c;background:#1a1a22;object-fit:cover}
-  .player-info{padding:44px 20px 16px}
-  .player-name{font-size:18px;font-weight:800;margin-bottom:4px}
+  .player-banner{height:100px;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);position:relative}
+  .player-banner::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 50%,rgba(0,0,0,.4) 100%)}
+  .player-avatar-wrap{position:absolute;bottom:-42px;left:20px;z-index:2}
+  .player-avatar{width:84px;height:84px;border-radius:16px;border:3px solid #0a0a0c;background:#1a1a22;object-fit:cover;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .player-info{padding:52px 20px 16px}
+  .player-name{font-size:18px;font-weight:800;margin-bottom:4px;display:flex;align-items:center;gap:6px}
   .player-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
   .player-chip{padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace}
-  .player-chip.gold{color:#fbbf24;border-color:rgba(251,191,36,.3)}
-  .player-chip.green{color:#22c55e;border-color:rgba(34,197,94,.3)}
-  .player-chip.purple{color:var(--accent-hi);border-color:rgba(124,92,255,.3)}
-  .player-chip.red{color:#f87171;border-color:rgba(239,68,68,.3)}
+  .player-chip.gold{color:var(--gold);border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.08)}
+  .player-chip.green{color:#22c55e;border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.08)}
+  .player-chip.purple{color:var(--accent-hi);border-color:rgba(124,92,255,.3);background:rgba(124,92,255,.08)}
+  .player-chip.red{color:#f87171;border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.08)}
   .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
   .info-item{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px}
-  .info-item .lbl{font-size:10px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+  .info-item .lbl{font-size:10px;color:var(--text-mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
   .info-item .val{font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;word-break:break-all}
   .activity-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
   .json-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;max-height:280px;overflow:auto;white-space:pre-wrap;color:var(--text-dim);margin-top:12px}
-  .mini-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:6px 0}
-  .mini-card{background:#0a0a0c;border:1px solid #1a1a22;border-radius:12px;overflow:hidden;cursor:pointer;transition:all .15s;position:relative}
-  .mini-card:hover{border-color:var(--accent);transform:translateY(-1px)}
-  .mini-card.mini-loading{padding:20px;text-align:center;color:var(--text-mute);font-size:12px}
-  .mini-banner{height:48px;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)}
-  .mini-body{display:flex;align-items:flex-start;gap:10px;padding:8px 12px 12px;margin-top:-20px;position:relative}
-  .mini-avatar{width:48px;height:48px;border-radius:10px;border:2px solid #0a0a0c;object-fit:cover;background:#1a1a22;flex-shrink:0}
-  .mini-av-fallback{display:flex;align-items:center;justify-content:center;font-size:20px}
-  .mini-meta{flex:1;min-width:0;padding-top:18px}
-  .mini-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .mini-uid{font-size:11px;color:var(--text-mute);font-family:'JetBrains Mono',monospace}
-  .mini-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
-  .mini-chips span{padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text-dim)}
-  .mini-x{position:absolute;top:8px;right:8px;z-index:2}
   .copy-btn{padding:2px 6px !important;font-size:11px !important;min-width:auto;opacity:.7}
   .copy-btn:hover{opacity:1}
-  .info-item .lbl{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-  @media (max-width:900px){.shell{grid-template-columns:1fr;padding:16px}.sidebar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px}.sidebar-title{display:none}.field-row{grid-template-columns:1fr}.nav{padding:12px 16px}textarea.editor{min-height:360px;font-size:12px}.info-grid{grid-template-columns:1fr}}
-  @media (max-width:520px){.sidebar{grid-template-columns:1fr}.nav-title span{display:none}.panel-title{font-size:17px}.stat-card .value{font-size:18px}}
   .hidden{display:none !important}
+
+  /* ====== NEW: AUTO TARGETS - BEAUTIFUL CARDS ====== */
+  .auto-summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+  .auto-summary{background:linear-gradient(135deg,rgba(124,92,255,.08),rgba(6,182,212,.04));border:1px solid rgba(124,92,255,.2);border-radius:10px;padding:12px 14px}
+  .auto-summary .lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-mute);margin-bottom:4px}
+  .auto-summary .val{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--accent-hi)}
+
+  .server-block{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:14px}
+  .server-block-header{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,rgba(124,92,255,.05),transparent)}
+  .server-block-flag{width:42px;height:42px;border-radius:11px;background:linear-gradient(135deg,rgba(124,92,255,.2),rgba(6,182,212,.15));border:1px solid rgba(124,92,255,.3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+  .server-block-info{flex:1;min-width:0}
+  .server-block-name{font-size:15px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-.01em}
+  .server-block-meta{font-size:11.5px;color:var(--text-mute);margin-top:2px}
+  .server-block-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+  .targets-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;padding:14px}
+
+  .target-card{background:#0a0a0c;border:1px solid #1a1a22;border-radius:12px;overflow:hidden;position:relative;cursor:pointer;transition:all .2s cubic-bezier(.16,1,.3,1)}
+  .target-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 12px 32px rgba(124,92,255,.2)}
+  .target-card.loading{display:flex;align-items:center;justify-content:center;padding:28px 16px;color:var(--text-mute);font-size:12px;font-family:'JetBrains Mono',monospace}
+  .target-card.loading::before{content:'';width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin-right:8px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .target-banner{height:56px;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);position:relative;overflow:hidden}
+  .target-banner::after{content:'';position:absolute;top:0;right:0;width:60%;height:100%;background:radial-gradient(circle at 80% 40%,rgba(124,92,255,.3),transparent 70%);pointer-events:none}
+
+  .target-body{display:flex;align-items:flex-start;gap:10px;padding:0 12px 12px;margin-top:-24px;position:relative;z-index:2}
+  .target-avatar{width:56px;height:56px;border-radius:12px;border:3px solid #0a0a0c;object-fit:cover;background:#1a1a22;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+  .target-av-fallback{width:56px;height:56px;border-radius:12px;border:3px solid #0a0a0c;background:linear-gradient(135deg,#1a1a22,#252535);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+  .target-meta{flex:1;min-width:0;padding-top:26px}
+  .target-name{font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.01em;margin-bottom:2px}
+  .target-uid{font-size:11px;color:var(--text-mute);font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:4px;margin-bottom:6px}
+  .target-chips{display:flex;flex-wrap:wrap;gap:4px}
+  .target-chips span{padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text-dim)}
+  .target-chips .lvl{color:var(--gold);border-color:rgba(251,191,36,.25);background:rgba(251,191,36,.06)}
+  .target-chips .likes{color:#22c55e;border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.06)}
+  .target-chips .guild{color:var(--accent-hi);border-color:rgba(124,92,255,.25);background:rgba(124,92,255,.06)}
+
+  .target-remove{position:absolute;top:8px;right:8px;z-index:3;width:26px;height:26px;border-radius:8px;background:rgba(239,68,68,.9);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;transition:all .15s;opacity:.85}
+  .target-remove:hover{opacity:1;background:#dc2626;transform:scale(1.1)}
+
+  .target-last-like{position:absolute;bottom:8px;right:10px;font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace;padding:2px 7px;border-radius:999px;background:rgba(34,197,94,.12);color:#4ade80;border:1px solid rgba(34,197,94,.25);z-index:3}
+  .target-last-like.pending{background:rgba(245,158,11,.12);color:#fbbf24;border-color:rgba(245,158,11,.25)}
+  .target-last-like.blocked{background:rgba(239,68,68,.12);color:#f87171;border-color:rgba(239,68,68,.25)}
+
+  .target-info-src{position:absolute;top:8px;left:8px;z-index:3;font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.6);color:var(--text-dim);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.08)}
+  .target-info-src.daily{color:#22c55e;border-color:rgba(34,197,94,.3)}
+  .target-info-src.cached{color:#fbbf24;border-color:rgba(251,191,36,.3)}
+
+  .blocked-tag{position:absolute;top:44px;left:8px;z-index:3;font-size:9px;font-weight:800;padding:3px 8px;border-radius:6px;background:rgba(239,68,68,.9);color:#fff;letter-spacing:.05em}
+
+  @media (max-width:900px){
+    .shell{grid-template-columns:1fr;padding:16px}
+    .sidebar{position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+    .sidebar-title{display:none}
+    .field-row{grid-template-columns:1fr}
+    .nav{padding:12px 16px}
+    textarea.editor{min-height:360px;font-size:12px}
+    .info-grid{grid-template-columns:1fr}
+    .targets-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+  }
+  @media (max-width:520px){
+    .sidebar{grid-template-columns:1fr}
+    .nav-title span{display:none}
+    .panel-title{font-size:17px}
+    .stat-card .value{font-size:18px}
+    .targets-grid{grid-template-columns:1fr 1fr;padding:10px;gap:8px}
+    .target-avatar,.target-av-fallback{width:46px;height:46px;font-size:20px}
+    .target-body{margin-top:-20px}
+    .target-meta{padding-top:22px}
+  }
 </style>
 </head>
 <body>
@@ -404,47 +459,70 @@
       </div>
     </div>
 
-    <!-- Auto Targets -->
+    <!-- ======== AUTO TARGETS (REDESIGNED) ======== -->
     <div class="panel" id="panel-auto">
       <div class="panel-header">
         <div>
-          <div class="panel-title">Auto Targets</div>
-          <div class="panel-sub">Manual only — no auto-add from public API</div>
+          <div class="panel-title">🤖 Auto Like Targets</div>
+          <div class="panel-sub">প্রতিদিন auto-like চালানোর পর info DB থেকে data এসে এখানে দেখাবে</div>
         </div>
-        <button class="btn" onclick="loadAuto()">🔄 Refresh</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="loadAuto()">🔄 Refresh Info</button>
+          <button class="btn btn-success" onclick="runAuto()">▶ Run Now</button>
+        </div>
       </div>
+
+      <!-- Summary strip -->
+      <div class="auto-summary-grid" id="autoSummary">
+        <div class="auto-summary"><div class="lbl">Total UIDs</div><div class="val" id="asTotal">—</div></div>
+        <div class="auto-summary"><div class="lbl">Ready</div><div class="val" id="asReady" style="color:var(--success)">—</div></div>
+        <div class="auto-summary"><div class="lbl">Blocked</div><div class="val" id="asBlocked" style="color:var(--danger)">—</div></div>
+        <div class="auto-summary"><div class="lbl">Last Run</div><div class="val" id="asLastRun" style="font-size:13px;color:var(--text-dim)">—</div></div>
+      </div>
+
+      <!-- Add single -->
       <div class="card">
         <div class="card-title"><span class="ico">➕</span> Add Single UID</div>
         <div class="field-row">
-          <input id="addUid" class="input" placeholder="UID"/>
+          <input id="addUid" class="input" placeholder="Enter UID (numeric)"/>
           <select id="addServer" class="input">
-            <option value="BD">BD</option><option value="IND">IND</option>
-            <option value="BR">BR</option><option value="US">US</option>
-            <option value="SAC">SAC</option><option value="NA">NA</option>
+            <option value="BD">🇧🇩 BD</option>
+            <option value="IND">🇮🇳 IND</option>
+            <option value="BR">🇧🇷 BR</option>
+            <option value="US">🇺🇸 US</option>
+            <option value="SAC">🌎 SAC</option>
+            <option value="NA">🌎 NA</option>
           </select>
         </div>
-        <button class="btn btn-primary" onclick="addAuto()">Add to Auto</button>
+        <button class="btn btn-primary" onclick="addAuto()" style="width:100%;justify-content:center">➕ Add to Auto & Fetch Info</button>
       </div>
+
+      <!-- Bulk -->
       <div class="card">
-        <div class="card-title"><span class="ico">📦</span> Bulk Upload</div>
+        <div class="card-title"><span class="ico">📦</span> Bulk Import</div>
         <div class="field-row">
           <select id="bulkServer" class="input">
-            <option value="BD">BD</option><option value="IND">IND</option>
-            <option value="BR">BR</option><option value="US">US</option>
-            <option value="SAC">SAC</option><option value="NA">NA</option>
+            <option value="BD">🇧🇩 BD</option>
+            <option value="IND">🇮🇳 IND</option>
+            <option value="BR">🇧🇷 BR</option>
+            <option value="US">🇺🇸 US</option>
+            <option value="SAC">🌎 SAC</option>
+            <option value="NA">🌎 NA</option>
           </select>
           <select id="bulkMode" class="input">
-            <option value="replace">Replace</option>
-            <option value="append">Append</option>
+            <option value="replace">🔄 Replace</option>
+            <option value="append">➕ Append</option>
           </select>
         </div>
-        <textarea id="bulkText" class="bulk-input" placeholder="Paste UIDs (one per line)"></textarea>
+        <textarea id="bulkText" class="bulk-input" placeholder="Paste UIDs (one per line, or comma separated)"></textarea>
         <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn btn-primary" onclick="bulkUploadText()">Import Text</button>
+          <button class="btn btn-primary" onclick="bulkUploadText()" style="flex:1;justify-content:center">📥 Import Text</button>
           <button class="btn" onclick="document.getElementById('bulkFile').click()">📁 From File</button>
           <input type="file" id="bulkFile" style="display:none" onchange="bulkUploadFile(event)"/>
         </div>
       </div>
+
+      <!-- Server blocks with target cards -->
       <div id="autoPanels"></div>
     </div>
 
@@ -503,11 +581,14 @@
 let MASTER_KEY = localStorage.getItem('mahir_master_key') || '';
 let CURRENT_FILE = null;
 let STATS = null;
+let AUTO_INFO_CACHE = {};   // uid → info card from /master/api/player-info
+
 const SERVER_FLAGS = {BD:'🇧🇩',IND:'🇮🇳',BR:'🇧🇷',US:'🇺🇸',SAC:'🌎',NA:'🌎'};
-const AVATAR_CDN = 'https://iconapi.wasmer.app/';
+const AVATAR_CDN = 'https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/';
+
 function avatarSrc(headPic) {
   if (!headPic) return '';
-  return AVATAR_CDN + headPic;
+  return AVATAR_CDN + headPic + '.png';
 }
 function copyText(text, label) {
   if (!text) return toast('Nothing to copy', false);
@@ -699,7 +780,6 @@ async function loadBlocked() {
     const data = await api('/master/api/blocked');
     const list = data.blocked || [];
     document.getElementById('blockedCount').textContent = list.length;
-    document.getElementById('sBlocked') && (document.getElementById('sBlocked').textContent = list.length);
     document.getElementById('blockedList').innerHTML = list.length === 0
       ? '<div class="empty"><div class="icon">✅</div>No blocked UIDs</div>'
       : list.map(u => `
@@ -726,6 +806,7 @@ async function doBlockUid(uid) {
     logMsg('Blocked UID: ' + uid, 'ok');
     document.getElementById('blockUidInput').value = '';
     loadBlocked();
+    loadAuto();  // refresh cards to show blocked tag
   } catch (e) {
     toast('Block failed: ' + e.message, false);
   }
@@ -741,6 +822,7 @@ async function doUnblockUid(uid) {
     toast('Unblocked ' + uid, true);
     logMsg('Unblocked UID: ' + uid, 'info');
     loadBlocked();
+    loadAuto();
   } catch (e) {
     toast('Unblock failed: ' + e.message, false);
   }
@@ -761,34 +843,41 @@ async function openPlayerInfo(uid) {
       </div>
     `).join('') || '<div class="empty" style="padding:12px">No likes sent today</div>';
 
-    const duo = data.duo;
-    let duoHtml = '';
-    if (duo && duo.partner_uid) {
-      duoHtml = `
-        <div style="margin-top:14px">
-          <div class="card-title" style="margin-bottom:8px"><span class="ico">🤝</span> Dynamic Duo</div>
-          <div class="info-grid">
-            <div class="info-item"><div class="lbl">Partner UID ${copyBtn(duo.partner_uid,'Partner UID')}</div><div class="val">${escapeHtml(String(duo.partner_uid))}</div></div>
-            <div class="info-item"><div class="lbl">Duo Level</div><div class="val">${duo.duo_level ?? '—'}</div></div>
-            <div class="info-item"><div class="lbl">Duo Score</div><div class="val">${duo.duo_score ?? '—'}</div></div>
-            <div class="info-item"><div class="lbl">Status</div><div class="val">${escapeHtml(duo.status || '—')}</div></div>
-          </div>
+    // History (daily snapshots)
+    const historyDays = data.history_days || [];
+    let historyHtml = '';
+    if (historyDays.length) {
+      const days = historyDays.sort().reverse().slice(0, 7);
+      historyHtml = `
+        <div style="margin-top:16px">
+          <div class="card-title" style="margin-bottom:8px"><span class="ico">📅</span> Daily Info History (${historyDays.length} days)</div>
+          ${days.map(d => {
+            const day = data.history[d] || {};
+            const snaps = (day.snapshots || []);
+            const last = snaps[snaps.length - 1] || {};
+            const sn = last.snapshot || {};
+            return `
+              <div style="padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:12px">
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                  <strong style="color:var(--accent-hi);font-family:'JetBrains Mono',monospace">${d}</strong>
+                  <span style="color:var(--text-mute);font-size:11px">${snaps.length} snap(s) · ${escapeHtml(day.last_at || '')}</span>
+                </div>
+                <div style="color:var(--text-dim);font-family:'JetBrains Mono',monospace;font-size:11px">
+                  ❤ ${sn.likes ?? '—'} · Lvl ${sn.level ?? '—'} · ${escapeHtml(sn.nickname || '')} · src: ${escapeHtml(last.source || '—')}${last.likes_given ? ' (+' + last.likes_given + ')' : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
         </div>`;
-    } else if (duo) {
-      duoHtml = `<div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--text-mute)">🤝 No Dynamic Duo found</div>`;
     }
-
-    const clanLabel = data.clanName
-      ? `${escapeHtml(data.clanName)}${data.clanId ? ' · ' + escapeHtml(String(data.clanId)) : ''}`
-      : '—';
 
     document.getElementById('playerModalBody').innerHTML = `
       <div class="player-card">
         <div class="player-banner"></div>
         <div class="player-avatar-wrap">
           ${avatarUrl
-            ? `<img class="player-avatar" src="${avatarUrl}" onerror="this.outerHTML='<div class=\\'player-avatar\\' style=\\'display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a1a22\\'>👤</div>'"/>`
-            : `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:28px;background:#1a1a22">👤</div>`
+            ? `<img class="player-avatar" src="${avatarUrl}" onerror="this.outerHTML='<div class=\\'player-avatar\\' style=\\'display:flex;align-items:center;justify-content:center;font-size:32px;background:#1a1a22\\'>👤</div>'"/>`
+            : `<div class="player-avatar" style="display:flex;align-items:center;justify-content:center;font-size:32px;background:#1a1a22">👤</div>`
           }
         </div>
         <div class="player-info">
@@ -823,22 +912,22 @@ async function openPlayerInfo(uid) {
 
       ${data.signature ? `<div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--text-dim)">${escapeHtml(data.signature)}</div>` : ''}
 
-      ${duoHtml}
-
       <div style="margin-top:16px">
         <div class="card-title" style="margin-bottom:8px"><span class="ico">📈</span> Today's Like Activity</div>
         ${activity}
       </div>
 
+      ${historyHtml}
+
       <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
         ${data.is_blocked
-          ? `<button class="btn btn-success" onclick="doUnblockUid('${data.uid}');closePlayerModal()">Unblock</button>`
+          ? `<button class="btn btn-success" onclick="doUnblockUid('${data.uid}');closePlayerModal()">✅ Unblock</button>`
           : `<button class="btn btn-danger" onclick="doBlockUid('${data.uid}');closePlayerModal()">🚫 Block</button>`
         }
         <button class="btn" onclick="toggleFullJson()">📄 Full JSON</button>
         <button class="btn" onclick="copyText('${data.uid}','UID')">📋 Copy UID</button>
       </div>
-      <div class="json-box hidden" id="fullJsonBox">${escapeHtml(JSON.stringify({...data, full: data.full}, null, 2))}</div>
+      <div class="json-box hidden" id="fullJsonBox">${escapeHtml(JSON.stringify({...data, full: undefined}, null, 2))}</div>
     `;
   } catch (e) {
     document.getElementById('playerModalBody').innerHTML = `<div class="empty" style="color:var(--danger)">Failed: ${escapeHtml(e.message)}</div>`;
@@ -1024,92 +1113,116 @@ async function saveKeys() {
   }
 }
 
-/* ---- AUTO ---- */
-const playerCache = {};
-
-async function fetchPlayerCard(uid) {
-  if (playerCache[uid]) return playerCache[uid];
-  try {
-    const data = await api('/master/api/player-info?uid=' + encodeURIComponent(uid));
-    playerCache[uid] = data;
-    return data;
-  } catch (e) {
-    return { uid, nickname: 'Unknown', level: 0, likes: 0, clanName: '', headPic: null, region: '' };
-  }
-}
-
-function renderMiniCard(p, srv) {
-  const avatarUrl = p.avatarUrl || avatarSrc(p.headPic);
-  const guildText = p.clanName
-    ? (p.clanId ? `${p.clanName} · ${p.clanId}` : p.clanName)
-    : '';
-  return `
-    <div class="mini-card" onclick="openPlayerInfo('${p.uid}')">
-      <div class="mini-banner"></div>
-      <div class="mini-body">
-        ${avatarUrl
-          ? `<img class="mini-avatar" src="${avatarUrl}" onerror="this.outerHTML='<div class=\\'mini-avatar mini-av-fallback\\'>👤</div>'"/>`
-          : `<div class="mini-avatar mini-av-fallback">👤</div>`
-        }
-        <div class="mini-meta">
-          <div class="mini-name">${escapeHtml(p.nickname || 'Unknown')}</div>
-          <div class="mini-uid">${escapeHtml(String(p.uid))} ${copyBtn(p.uid,'UID')}</div>
-          <div class="mini-chips">
-            <span>Lvl ${p.level ?? '—'}</span>
-            <span>❤ ${p.likes ?? 0}</span>
-            ${guildText ? `<span>${escapeHtml(guildText)}</span>` : ''}
-          </div>
-        </div>
-        <button class="btn btn-sm btn-danger mini-x" onclick="event.stopPropagation();removeAuto('${srv}','${p.uid}')">✕</button>
-      </div>
-    </div>
-  `;
-}
+/* =========================================================
+   AUTO TARGETS — redesigned with DB info + beautiful cards
+   ========================================================= */
 
 async function loadAuto() {
   try {
-    const data = await api('/master/api/stats');
-    const targets = data.auto_targets_full || {};
-    const panels = document.getElementById('autoPanels');
-    panels.innerHTML = Object.keys(SERVER_FLAGS).map(srv => {
-      const uids = targets[srv] || [];
+    // 1) Get auto-with-info (targets + DB snapshots + last run summary)
+    const data = await api('/master/api/auto-with-info');
+    const info = data.auto_with_info || {};
+    const summary = data.last_run_summary || {};
+
+    // 2) Summary strip
+    const totalUids = Object.values(info).reduce((a, b) => a + b.length, 0);
+    const blockedCount = Object.values(info).flat().filter(x => x.is_blocked).length;
+    const readyCount = totalUids - blockedCount;
+    document.getElementById('asTotal').textContent = totalUids;
+    document.getElementById('asReady').textContent = readyCount;
+    document.getElementById('asBlocked').textContent = blockedCount;
+    document.getElementById('asLastRun').textContent = summary.last_run || '—';
+    document.getElementById('autoCount').textContent = totalUids;
+
+    // 3) Render server blocks with target cards
+    const container = document.getElementById('autoPanels');
+    const serversWithData = Object.keys(SERVER_FLAGS);
+
+    container.innerHTML = serversWithData.map(srv => {
+      const rows = info[srv] || [];
+      const meta = rows.length === 0
+        ? 'No targets'
+        : `${rows.length} UID${rows.length > 1 ? 's' : ''} · ${rows.filter(r => r.last_likes_given).length} active`;
+
+      const gridHtml = rows.length === 0
+        ? `<div class="empty" style="padding:24px;grid-column:1/-1">
+             <div class="icon">${SERVER_FLAGS[srv]}</div>
+             No auto targets in ${srv}
+           </div>`
+        : rows.map(r => renderTargetCard(r, srv)).join('');
+
       return `
-        <div class="card">
-          <div class="card-title" style="justify-content:space-between">
-            <span style="display:flex;align-items:center;gap:8px">
-              <span class="ico">${SERVER_FLAGS[srv]}</span>
-              ${srv} — ${uids.length} UIDs
-            </span>
-            ${uids.length > 0 ? `
-              <button class="btn btn-sm btn-danger" onclick="clearServerAuto('${srv}')">🗑️ Clear ${srv}</button>
-            ` : ''}
+        <div class="server-block">
+          <div class="server-block-header">
+            <div class="server-block-flag">${SERVER_FLAGS[srv]}</div>
+            <div class="server-block-info">
+              <div class="server-block-name">${srv}</div>
+              <div class="server-block-meta">${meta}</div>
+            </div>
+            <div class="server-block-actions">
+              ${rows.length > 0 ? `<button class="btn btn-sm btn-danger" onclick="clearServerAuto('${srv}')">🗑️ Clear</button>` : ''}
+            </div>
           </div>
-          <div class="mini-grid" id="autoGrid-${srv}">
-            ${uids.length === 0
-              ? '<div class="empty" style="padding:12px">No targets</div>'
-              : uids.map(u => `<div class="mini-card mini-loading" data-uid="${u}" data-srv="${srv}">Loading ${u}…</div>`).join('')
-            }
-          </div>
+          <div class="targets-grid">${gridHtml}</div>
         </div>
       `;
     }).join('');
 
-    // Load player cards in parallel (batched)
-    for (const srv of Object.keys(SERVER_FLAGS)) {
-      const uids = targets[srv] || [];
-      if (!uids.length) continue;
-      const results = await Promise.all(uids.map(u => fetchPlayerCard(u)));
-      const grid = document.getElementById('autoGrid-' + srv);
-      if (grid) {
-        grid.innerHTML = results.map(p => renderMiniCard(p, srv)).join('');
-      }
-    }
-
-    const total = Object.values(data.auto_targets || {}).reduce((a,b)=>a+b, 0);
-    document.getElementById('autoCount').textContent = total;
   } catch (e) {
     toast('Auto load failed: ' + e.message, false);
   }
+}
+
+function renderTargetCard(r, srv) {
+  const uid = r.uid;
+  const nickname = r.nickname || 'Unknown';
+  const level = r.level ?? 0;
+  const likes = r.likes ?? 0;
+  const avatarUrl = r.avatarUrl || avatarSrc(r.headPic);
+  const guildText = r.clanName
+    ? (r.clanId ? `${r.clanName}` : r.clanName)
+    : '';
+
+  const infoDate = r.info_date || '';
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isFresh = infoDate === todayStr;
+  const srcClass = isFresh ? 'daily' : 'cached';
+  const srcLabel = isFresh ? '✓ Today' : (infoDate || 'No data');
+
+  let likeTag = '';
+  if (r.is_blocked) {
+    likeTag = `<span class="target-last-like blocked">BLOCKED</span>`;
+  } else if (r.last_likes_given !== undefined && r.last_likes_given !== null) {
+    const n = r.last_likes_given;
+    likeTag = `<span class="target-last-like">+${n} like${n !== 1 ? 's' : ''}</span>`;
+  } else {
+    likeTag = `<span class="target-last-like pending">pending</span>`;
+  }
+
+  return `
+    <div class="target-card" onclick="openPlayerInfo('${uid}')">
+      <div class="target-info-src ${srcClass}">${escapeHtml(srcLabel)}</div>
+      ${r.is_blocked ? '<span class="blocked-tag">BLOCKED</span>' : ''}
+      <button class="target-remove" onclick="event.stopPropagation();removeAuto('${srv}','${uid}')" title="Remove">✕</button>
+      <div class="target-banner"></div>
+      <div class="target-body">
+        ${avatarUrl
+          ? `<img class="target-avatar" src="${avatarUrl}" onerror="this.outerHTML='<div class=\\'target-av-fallback\\'>👤</div>'"/>`
+          : `<div class="target-av-fallback">👤</div>`
+        }
+        <div class="target-meta">
+          <div class="target-name">${escapeHtml(nickname)}</div>
+          <div class="target-uid">${uid} ${copyBtn(uid,'UID')}</div>
+          <div class="target-chips">
+            <span class="lvl">Lvl ${level}</span>
+            <span class="likes">❤ ${likes}</span>
+            ${guildText ? `<span class="guild">${escapeHtml(guildText)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+      ${likeTag}
+    </div>
+  `;
 }
 
 async function bulkUploadText() {
@@ -1168,9 +1281,9 @@ async function addAuto() {
     toast('Added ' + uid + ' to ' + srv, true);
     logMsg('Added auto UID: ' + srv + '/' + uid, 'ok');
     document.getElementById('addUid').value = '';
-    delete playerCache[uid];
     await loadAuto();
-    openPlayerInfo(uid);  // show avatar + banner card after add
+    // auto-open info modal to show fetched info
+    openPlayerInfo(uid);
   } catch (e) {
     toast('Add failed: ' + e.message, false);
   }
@@ -1210,7 +1323,7 @@ async function clearServerAuto(srv) {
 
 /* ---- ACTIONS ---- */
 async function runAuto() {
-  if (!confirm('Run auto-like now?')) return;
+  if (!confirm('Run auto-like now? This will take some time.')) return;
   try {
     await api('/master/api/run-auto', {
       method: 'POST',
