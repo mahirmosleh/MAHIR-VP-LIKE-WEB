@@ -152,7 +152,7 @@
   .copy-btn:hover{opacity:1}
   .hidden{display:none !important}
 
-  /* ====== NEW: AUTO TARGETS - BEAUTIFUL CARDS ====== */
+  /* ====== AUTO TARGETS - BEAUTIFUL CARDS ====== */
   .auto-summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
   .auto-summary{background:linear-gradient(135deg,rgba(124,92,255,.08),rgba(6,182,212,.04));border:1px solid rgba(124,92,255,.2);border-radius:10px;padding:12px 14px}
   .auto-summary .lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-mute);margin-bottom:4px}
@@ -459,7 +459,7 @@
       </div>
     </div>
 
-    <!-- ======== AUTO TARGETS (REDESIGNED) ======== -->
+    <!-- ======== AUTO TARGETS ======== -->
     <div class="panel" id="panel-auto">
       <div class="panel-header">
         <div>
@@ -536,8 +536,13 @@
       </div>
       <div class="card">
         <div class="card-title"><span class="ico">🤖</span> Auto-Like</div>
-        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Run auto-like for all targets in auto.txt now.</p>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Run auto-like for all targets in auto.txt now. Info fetch runs automatically after.</p>
         <button class="btn btn-success" onclick="runAuto()">▶ Run Auto-Like Now</button>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="ico">📥</span> Info Fetch (DB)</div>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Fetch player info for all auto UIDs and store in DB. Skips UIDs already fetched today.</p>
+        <button class="btn btn-primary" onclick="runInfoFetch()">📥 Run Info Fetch Now</button>
       </div>
       <div class="card">
         <div class="card-title"><span class="ico">🔑</span> JWT Refresh</div>
@@ -581,7 +586,6 @@
 let MASTER_KEY = localStorage.getItem('mahir_master_key') || '';
 let CURRENT_FILE = null;
 let STATS = null;
-let AUTO_INFO_CACHE = {};   // uid → info card from /master/api/player-info
 
 const SERVER_FLAGS = {BD:'🇧🇩',IND:'🇮🇳',BR:'🇧🇷',US:'🇺🇸',SAC:'🌎',NA:'🌎'};
 const AVATAR_CDN = 'https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/';
@@ -780,6 +784,7 @@ async function loadBlocked() {
     const data = await api('/master/api/blocked');
     const list = data.blocked || [];
     document.getElementById('blockedCount').textContent = list.length;
+    document.getElementById('sBlocked').textContent = list.length;
     document.getElementById('blockedList').innerHTML = list.length === 0
       ? '<div class="empty"><div class="icon">✅</div>No blocked UIDs</div>'
       : list.map(u => `
@@ -806,7 +811,7 @@ async function doBlockUid(uid) {
     logMsg('Blocked UID: ' + uid, 'ok');
     document.getElementById('blockUidInput').value = '';
     loadBlocked();
-    loadAuto();  // refresh cards to show blocked tag
+    loadAuto();
   } catch (e) {
     toast('Block failed: ' + e.message, false);
   }
@@ -843,7 +848,6 @@ async function openPlayerInfo(uid) {
       </div>
     `).join('') || '<div class="empty" style="padding:12px">No likes sent today</div>';
 
-    // History (daily snapshots)
     const historyDays = data.history_days || [];
     let historyHtml = '';
     if (historyDays.length) {
@@ -863,7 +867,7 @@ async function openPlayerInfo(uid) {
                   <span style="color:var(--text-mute);font-size:11px">${snaps.length} snap(s) · ${escapeHtml(day.last_at || '')}</span>
                 </div>
                 <div style="color:var(--text-dim);font-family:'JetBrains Mono',monospace;font-size:11px">
-                  ❤ ${sn.likes ?? '—'} · Lvl ${sn.level ?? '—'} · ${escapeHtml(sn.nickname || '')} · src: ${escapeHtml(last.source || '—')}${last.likes_given ? ' (+' + last.likes_given + ')' : ''}
+                  ❤ ${sn.likes ?? '—'} · Lvl ${sn.level ?? '—'} · ${escapeHtml(sn.nickname || '')} · src: ${escapeHtml(last.source || '—')}
                 </div>
               </div>
             `;
@@ -898,16 +902,16 @@ async function openPlayerInfo(uid) {
       <div class="info-grid">
         <div class="info-item"><div class="lbl">BR Rank</div><div class="val">${data.rank ?? '—'}</div></div>
         <div class="info-item"><div class="lbl">CS Rank</div><div class="val">${data.csRank ?? '—'}</div></div>
-        <div class="info-item"><div class="lbl">Guild Name ${copyBtn(data.clanName,'Guild')}</div><div class="val">${escapeHtml(data.clanName || '—')}</div></div>
-        <div class="info-item"><div class="lbl">Guild UID ${copyBtn(data.clanId,'Guild UID')}</div><div class="val">${escapeHtml(String(data.clanId || '—'))}</div></div>
-        <div class="info-item"><div class="lbl">Guild Leader ${copyBtn(data.clanLeaderName,'Leader')}</div><div class="val">${escapeHtml(data.clanLeaderName || '—')}</div></div>
-        <div class="info-item"><div class="lbl">Leader UID ${copyBtn(data.clanLeaderUid,'Leader UID')}</div><div class="val">${escapeHtml(String(data.clanLeaderUid || '—'))}</div></div>
+        <div class="info-item"><div class="lbl">Guild Name</div><div class="val">${escapeHtml(data.clanName || '—')}</div></div>
+        <div class="info-item"><div class="lbl">Guild UID</div><div class="val">${escapeHtml(String(data.clanId || '—'))}</div></div>
+        <div class="info-item"><div class="lbl">Guild Leader</div><div class="val">${escapeHtml(data.clanLeaderName || '—')}</div></div>
+        <div class="info-item"><div class="lbl">Leader UID</div><div class="val">${escapeHtml(String(data.clanLeaderUid || '—'))}</div></div>
         <div class="info-item"><div class="lbl">Clan Level</div><div class="val">${data.clanLevel ?? '—'}</div></div>
         <div class="info-item"><div class="lbl">Credit</div><div class="val">${data.creditScore ?? '—'}</div></div>
         <div class="info-item"><div class="lbl">Last Login</div><div class="val">${escapeHtml(data.lastLogin || '—')}</div></div>
         <div class="info-item"><div class="lbl">Account Age</div><div class="val">${escapeHtml(data.accountAge || '—')}</div></div>
         <div class="info-item"><div class="lbl">Created</div><div class="val">${escapeHtml(data.created || '—')}</div></div>
-        <div class="info-item"><div class="lbl">HeadPic ID ${copyBtn(data.headPic,'Avatar ID')}</div><div class="val">${data.headPic ?? '—'}</div></div>
+        <div class="info-item"><div class="lbl">HeadPic ID</div><div class="val">${data.headPic ?? '—'}</div></div>
       </div>
 
       ${data.signature ? `<div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--text-dim)">${escapeHtml(data.signature)}</div>` : ''}
@@ -927,7 +931,7 @@ async function openPlayerInfo(uid) {
         <button class="btn" onclick="toggleFullJson()">📄 Full JSON</button>
         <button class="btn" onclick="copyText('${data.uid}','UID')">📋 Copy UID</button>
       </div>
-      <div class="json-box hidden" id="fullJsonBox">${escapeHtml(JSON.stringify({...data, full: undefined}, null, 2))}</div>
+      <div class="json-box hidden" id="fullJsonBox">${escapeHtml(JSON.stringify(data, null, 2))}</div>
     `;
   } catch (e) {
     document.getElementById('playerModalBody').innerHTML = `<div class="empty" style="color:var(--danger)">Failed: ${escapeHtml(e.message)}</div>`;
@@ -1114,17 +1118,15 @@ async function saveKeys() {
 }
 
 /* =========================================================
-   AUTO TARGETS — redesigned with DB info + beautiful cards
+   AUTO TARGETS — with DB info
    ========================================================= */
 
 async function loadAuto() {
   try {
-    // 1) Get auto-with-info (targets + DB snapshots + last run summary)
     const data = await api('/master/api/auto-with-info');
     const info = data.auto_with_info || {};
     const summary = data.last_run_summary || {};
 
-    // 2) Summary strip
     const totalUids = Object.values(info).reduce((a, b) => a + b.length, 0);
     const blockedCount = Object.values(info).flat().filter(x => x.is_blocked).length;
     const readyCount = totalUids - blockedCount;
@@ -1134,7 +1136,6 @@ async function loadAuto() {
     document.getElementById('asLastRun').textContent = summary.last_run || '—';
     document.getElementById('autoCount').textContent = totalUids;
 
-    // 3) Render server blocks with target cards
     const container = document.getElementById('autoPanels');
     const serversWithData = Object.keys(SERVER_FLAGS);
 
@@ -1167,7 +1168,6 @@ async function loadAuto() {
         </div>
       `;
     }).join('');
-
   } catch (e) {
     toast('Auto load failed: ' + e.message, false);
   }
@@ -1179,9 +1179,7 @@ function renderTargetCard(r, srv) {
   const level = r.level ?? 0;
   const likes = r.likes ?? 0;
   const avatarUrl = r.avatarUrl || avatarSrc(r.headPic);
-  const guildText = r.clanName
-    ? (r.clanId ? `${r.clanName}` : r.clanName)
-    : '';
+  const guildText = r.clanName ? r.clanName : '';
 
   const infoDate = r.info_date || '';
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -1282,7 +1280,6 @@ async function addAuto() {
     logMsg('Added auto UID: ' + srv + '/' + uid, 'ok');
     document.getElementById('addUid').value = '';
     await loadAuto();
-    // auto-open info modal to show fetched info
     openPlayerInfo(uid);
   } catch (e) {
     toast('Add failed: ' + e.message, false);
@@ -1323,7 +1320,7 @@ async function clearServerAuto(srv) {
 
 /* ---- ACTIONS ---- */
 async function runAuto() {
-  if (!confirm('Run auto-like now? This will take some time.')) return;
+  if (!confirm('Run auto-like now? This will take some time and then fetch info.')) return;
   try {
     await api('/master/api/run-auto', {
       method: 'POST',
@@ -1332,6 +1329,21 @@ async function runAuto() {
     });
     toast('Auto-like triggered in background', true);
     logMsg('Manual auto-like triggered', 'ok');
+  } catch (e) {
+    toast('Failed: ' + e.message, false);
+  }
+}
+
+async function runInfoFetch() {
+  if (!confirm('Fetch player info for all auto UIDs now? UIDs already fetched today will be skipped.')) return;
+  try {
+    await api('/master/api/run-info-fetch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ key: MASTER_KEY })
+    });
+    toast('Info fetch triggered in background', true);
+    logMsg('Manual info fetch triggered', 'ok');
   } catch (e) {
     toast('Failed: ' + e.message, false);
   }
