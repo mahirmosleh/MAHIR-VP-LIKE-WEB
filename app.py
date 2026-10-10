@@ -1,18 +1,18 @@
-# app.py — MAHIR VIP LIKE — Complete Backend with Master Panel + Info DB + Blocklist
-# ==================================================================================
+# app.py — MAHIR VIP LIKE — Complete Backend with Master Panel + Info DB
+# ==========================================================
 #  Web:
 #    /              → User UI
 #    /master        → Master Admin Panel
 #
 #  Public APIs:
-#    /mahir&like?uid={uid}&key={key}
-#    /mahir&like?uid={uid}&key={key}&server_name=IND
-#    /like?uid={uid}&server_name={server}&key={key}
+#    /mahir&like?uid={uid}&key={key}                    ← SHORT (default BD)
+#    /mahir&like?uid={uid}&key={key}&server_name=IND    ← SHORT + server
+#    /like?uid={uid}&server_name={server}&key={key}     ← FULL
 #    /health
 #    /auto/list
 #    /cron/auto_like?secret={secret}
 #
-#  Master APIs:
+#  Master APIs (key required):
 #    GET    /master/api/files
 #    GET    /master/api/file?name=auto.txt
 #    POST   /master/api/file
@@ -21,26 +21,24 @@
 #    POST   /master/api/auto/add
 #    POST   /master/api/auto/remove
 #    POST   /master/api/auto/clear
-#    GET    /master/api/auto-with-info        ← NEW
-#    GET    /master/api/player-info?uid=X     ← NEW
-#    GET    /master/api/usage-detail?date=Y   ← NEW
-#    GET    /master/api/blocked               ← NEW
-#    POST   /master/api/block                 ← NEW
-#    POST   /master/api/unblock               ← NEW
-#    GET    /master/api/info-db               ← NEW
-#    POST   /master/api/info-db/clear         ← NEW
-#    POST   /master/api/info-db/fetch         ← NEW
+#    GET    /master/api/auto-with-info      ← NEW: auto targets + DB info
+#    GET    /master/api/player-info?uid=    ← NEW: player info from DB/live
+#    GET    /master/api/usage-detail?date=  ← NEW
+#    GET    /master/api/blocked             ← NEW
+#    POST   /master/api/block               ← NEW
+#    POST   /master/api/unblock             ← NEW
 #    GET    /master/api/keys
 #    POST   /master/api/keys
 #    GET    /master/api/stats
 #    POST   /master/api/run-auto
 #    POST   /master/api/jwt-refresh
-# ==================================================================================
+# ==========================================================
 
 import os
 import sys
 import json
 import time
+import sqlite3
 import binascii
 import asyncio
 import threading
@@ -48,7 +46,8 @@ from threading import RLock
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import (Flask, request, jsonify, Response, render_template)
+from flask import (Flask, request, jsonify, Response, render_template,
+                   send_from_directory, abort)
 from flask_cors import CORS
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -89,6 +88,7 @@ BRAND_NAME   = "MAHIR — Like API"
 BADGE_TEXT   = "MAHIR • XO • JE"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH  = os.path.join(BASE_DIR, "mahir_info.db")
 
 # ============================================================
 #  CONFIG
@@ -100,15 +100,8 @@ JWT_REFRESH_HOURS = 7
 AUTO_LIKE_HOUR    = 4
 AUTO_LIKE_MINUTE  = 10
 DAILY_LIMIT_USER  = 1
-
-INFO_API_BASE     = "https://mahir-info-api.vercel.app"
-
-INFO_DB_PATH      = os.path.join("/tmp", "mahir_info_db.json")
-USAGE_DB_PATH     = os.path.join("/tmp", "mahir_usage_detail.json")
-BLOCKED_DB_PATH   = os.path.join("/tmp", "mahir_blocked.json")
-INFO_DB_LOCK      = RLock()
-USAGE_DB_LOCK     = RLock()
-BLOCKED_DB_LOCK   = RLock()
+INFO_FETCH_HOUR   = 4      # info fetch hour (after auto-like)
+INFO_FETCH_MINUTE = 30     # 04:30
 
 SERVER_ACCOUNT_FILES = {
     "BD":  "account_bd.txt",
@@ -139,6 +132,7 @@ config_lock = RLock()
 usage_lock  = RLock()
 jwt_lock    = RLock()
 file_lock   = RLock()
+db_lock     = RLock()
 
 # ============================================================
 #  CONFIG LOADER
@@ -205,7 +199,266 @@ def _reset_at_str():
 
 
 # ============================================================
-#  USAGE / QUOTA  (daily quota for user keys)
+#  SQLITE INFO DATABASE
+# ============================================================
+def _db_connect():
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        # Daily player info snapshots
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS player_info (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid TEXT NOT NULL,
+                server TEXT NOT NULL,
+                date TEXT NOT NULL,
+                nickname TEXT,
+                level INTEGER,
+                likes INTEGER,
+                region TEXT,
+                clan_name TEXT,
+                clan_id TEXT,
+                clan_level INTEGER,
+                clan_leader_name TEXT,
+                clan_leader_uid TEXT,
+                rank INTEGER,
+                cs_rank INTEGER,
+                credit_score INTEGER,
+                head_pic INTEGER,
+                signature TEXT,
+                last_login TEXT,
+                created TEXT,
+                account_age TEXT,
+                raw_json TEXT,
+                source TEXT,
+                likes_given INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(uid, date)
+            )
+        """)
+        # Like activity per uid per day
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS like_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid TEXT NOT NULL,
+                date TEXT NOT NULL,
+                api_key TEXT,
+                server TEXT,
+                likes_given INTEGER DEFAULT 0,
+                requests INTEGER DEFAULT 0,
+                last_at TEXT,
+                nickname TEXT,
+                UNIQUE(uid, date)
+            )
+        """)
+        # Blocked UIDs
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS blocked_uids (
+                uid TEXT PRIMARY KEY,
+                reason TEXT,
+                blocked_at TEXT NOT NULL
+            )
+        """)
+        # Last auto-like run summary
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS run_summary (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                total_likes INTEGER DEFAULT 0,
+                total_uids INTEGER DEFAULT 0,
+                details TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+
+def db_save_player_info(uid, server, info, source="auto"):
+    """Save a daily snapshot. Only ONE per uid per day (UNIQUE constraint)."""
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        today = _today_str()
+        c.execute("""
+            INSERT INTO player_info
+              (uid, server, date, nickname, level, likes, region,
+               clan_name, clan_id, clan_level, clan_leader_name,
+               clan_leader_uid, rank, cs_rank, credit_score, head_pic,
+               signature, last_login, created, account_age, raw_json,
+               source, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(uid, date) DO UPDATE SET
+              nickname=excluded.nickname,
+              level=excluded.level,
+              likes=excluded.likes,
+              region=excluded.region,
+              clan_name=excluded.clan_name,
+              clan_id=excluded.clan_id,
+              clan_level=excluded.clan_level,
+              clan_leader_name=excluded.clan_leader_name,
+              clan_leader_uid=excluded.clan_leader_uid,
+              rank=excluded.rank,
+              cs_rank=excluded.cs_rank,
+              credit_score=excluded.credit_score,
+              head_pic=excluded.head_pic,
+              signature=excluded.signature,
+              last_login=excluded.last_login,
+              created=excluded.created,
+              account_age=excluded.account_age,
+              raw_json=excluded.raw_json,
+              source=excluded.source
+        """, (
+            str(uid), server, today,
+            info.get("nickname"), info.get("level"), info.get("likes"),
+            info.get("region"),
+            info.get("clanName"), info.get("clanId"), info.get("clanLevel"),
+            info.get("clanLeaderName"), info.get("clanLeaderUid"),
+            info.get("rank"), info.get("csRank"), info.get("creditScore"),
+            info.get("headPic"), info.get("signature"),
+            info.get("lastLogin"), info.get("created"), info.get("accountAge"),
+            json.dumps(info, ensure_ascii=False), source,
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+        conn.close()
+
+
+def db_get_player_info(uid, date=None):
+    """Get player info for a specific date (default: today)."""
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        if date:
+            c.execute("SELECT * FROM player_info WHERE uid=? AND date=?", (str(uid), date))
+        else:
+            c.execute("SELECT * FROM player_info WHERE uid=? ORDER BY date DESC LIMIT 1", (str(uid),))
+        row = c.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+
+def db_get_player_history(uid, days=7):
+    """Get daily history for a uid."""
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("""
+            SELECT * FROM player_info WHERE uid=?
+            ORDER BY date DESC LIMIT ?
+        """, (str(uid), days))
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+        return rows
+
+
+def db_save_like_activity(uid, api_key, server, likes_given, requests_count, nickname):
+    """Upsert today's like activity for a uid."""
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        today = _today_str()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("""
+            INSERT INTO like_activity (uid, date, api_key, server, likes_given, requests, last_at, nickname)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(uid, date) DO UPDATE SET
+              likes_given = likes_given + excluded.likes_given,
+              requests = requests + excluded.requests,
+              last_at = excluded.last_at,
+              api_key = excluded.api_key,
+              server = excluded.server,
+              nickname = COALESCE(excluded.nickname, nickname)
+        """, (str(uid), today, api_key, server, likes_given, requests_count, now, nickname))
+        conn.commit()
+        conn.close()
+
+
+def db_get_like_activity(uid, date=None):
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        if date:
+            c.execute("SELECT * FROM like_activity WHERE uid=? AND date=?", (str(uid), date))
+        else:
+            c.execute("SELECT * FROM like_activity WHERE uid=? ORDER BY date DESC LIMIT 1", (str(uid),))
+        row = c.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+
+def db_is_blocked(uid):
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM blocked_uids WHERE uid=?", (str(uid),))
+        r = c.fetchone()
+        conn.close()
+        return r is not None
+
+
+def db_block_uid(uid, reason=""):
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO blocked_uids (uid, reason, blocked_at)
+            VALUES (?,?,?)
+            ON CONFLICT(uid) DO UPDATE SET reason=excluded.reason
+        """, (str(uid), reason, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+
+
+def db_unblock_uid(uid):
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("DELETE FROM blocked_uids WHERE uid=?", (str(uid),))
+        conn.commit()
+        conn.close()
+
+
+def db_get_blocked():
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("SELECT uid, reason, blocked_at FROM blocked_uids ORDER BY blocked_at DESC")
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+        return rows
+
+
+def db_save_run_summary(total_likes, total_uids, details=None):
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO run_summary (run_at, total_likes, total_uids, details)
+            VALUES (?,?,?,?)
+        """, (datetime.now().isoformat(), total_likes, total_uids,
+              json.dumps(details or {}, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+
+
+def db_get_last_run():
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("SELECT * FROM run_summary ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+
+# ============================================================
+#  USAGE / QUOTA
 # ============================================================
 def _load_usage():
     with usage_lock:
@@ -248,80 +501,6 @@ def check_and_consume_quota(api_key, uid, tier):
     u[api_key] = entry
     _save_usage(u)
     return True, max(0, DAILY_LIMIT_USER - len(uids)), None
-
-
-# ============================================================
-#  USAGE DETAIL DB  (for /master/api/usage-detail)
-# ============================================================
-def _load_usage_detail():
-    with USAGE_DB_LOCK:
-        if not os.path.exists(USAGE_DB_PATH):
-            return {}
-        try:
-            with open(USAGE_DB_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-def _save_usage_detail(db):
-    with USAGE_DB_LOCK:
-        try:
-            with open(USAGE_DB_PATH, "w", encoding="utf-8") as f:
-                json.dump(db, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[USAGE-DB] save error: {e}")
-
-
-def log_usage_detail(api_key, uid, server_name, nickname, likes_given):
-    """Record one like-call for daily usage detail view."""
-    today = _today_str()
-    db = _load_usage_detail()
-    day = db.setdefault(today, {})
-    entry_key = f"{api_key}|{uid}"
-    e = day.get(entry_key, {
-        "api_key": api_key,
-        "uid": str(uid),
-        "server": server_name,
-        "nickname": nickname or "",
-        "requests": 0,
-        "likes_given_total": 0,
-        "last_at": "",
-    })
-    e["requests"] += 1
-    e["likes_given_total"] += int(likes_given or 0)
-    e["nickname"] = nickname or e.get("nickname", "")
-    e["server"] = server_name or e.get("server", "")
-    e["last_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    day[entry_key] = e
-    _save_usage_detail(db)
-
-
-# ============================================================
-#  BLOCKED UID DB
-# ============================================================
-def _load_blocked():
-    with BLOCKED_DB_LOCK:
-        if not os.path.exists(BLOCKED_DB_PATH):
-            return set()
-        try:
-            with open(BLOCKED_DB_PATH, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-        except Exception:
-            return set()
-
-
-def _save_blocked(s):
-    with BLOCKED_DB_LOCK:
-        try:
-            with open(BLOCKED_DB_PATH, "w", encoding="utf-8") as f:
-                json.dump(sorted(list(s)), f)
-        except Exception:
-            pass
-
-
-def is_blocked_uid(uid):
-    return str(uid) in _load_blocked()
 
 
 # ============================================================
@@ -457,14 +636,6 @@ def get_or_refresh_tokens(server_name, force=False):
         return tokens
 
 
-def get_global_jwt():
-    for srv in ("BD", "IND", "BR", "US", "SAC", "NA"):
-        toks = get_or_refresh_tokens(srv)
-        if toks:
-            return toks[0]
-    return None
-
-
 # ============================================================
 #  FREE FIRE HELPERS
 # ============================================================
@@ -576,159 +747,62 @@ def parse_account_info(pb):
         uid = int(ai.get("UID", 0))
         if uid <= 0:
             return None
-        return {"uid": uid,
-                "likes": int(ai.get("Likes", 0)),
-                "name": str(ai.get("PlayerNickname", ""))}
+        return {
+            "uid": uid,
+            "likes": int(ai.get("Likes", 0)),
+            "name": str(ai.get("PlayerNickname", "")),
+            "level": int(ai.get("Level", 0)),
+            "region": str(ai.get("Region", "")),
+            "headPic": int(ai.get("HeadPic", 0)),
+            "exp": int(ai.get("Exp", 0)),
+            "raw": js,
+        }
     except Exception:
         return None
 
 
-# ============================================================
-#  INFO DATABASE  (daily cached player info)
-# ============================================================
-def _load_info_db():
-    with INFO_DB_LOCK:
-        if not os.path.exists(INFO_DB_PATH):
-            return {"records": {}, "last_run": None}
-        try:
-            with open(INFO_DB_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"records": {}, "last_run": None}
+def parse_full_player_info(pb, uid, server):
+    """Parse full player info from protobuf for DB storage."""
+    try:
+        if pb is None:
+            return None
+        js = json.loads(MessageToJson(pb))
+        ai = js.get("AccountInfo", {})
+        if not ai:
+            return None
 
+        def _int(v, d=0):
+            try: return int(v)
+            except: return d
 
-def _save_info_db(db):
-    with INFO_DB_LOCK:
-        try:
-            with open(INFO_DB_PATH, "w", encoding="utf-8") as f:
-                json.dump(db, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[INFO-DB] save error: {e}")
+        def _str(v, d=""):
+            try: return str(v)
+            except: return d
 
-
-def _fetch_info_api(jwt, uid):
-    """Call /info and /duo endpoints from mahir-info-api."""
-    result = {"info": None, "duo": None}
-    for ep in ("info", "duo"):
-        try:
-            url = f"{INFO_API_BASE}/{ep}?jwt={jwt}&uid={uid}"
-            r = requests.get(url, timeout=25, verify=False)
-            if r.status_code == 200:
-                try:
-                    result[ep] = r.json()
-                except Exception:
-                    result[ep] = {"raw": r.text}
-            else:
-                result[ep] = {"error": f"HTTP {r.status_code}"}
-        except Exception as e:
-            result[ep] = {"error": str(e)}
-        time.sleep(0.3)
-    return result
-
-
-def _extract_player_info(info_json, uid):
-    """
-    Normalize unknown response shape from /info.
-    Try to pull common fields regardless of nesting.
-    """
-    if not isinstance(info_json, dict):
-        return {}
-    # try common wrappers
-    for key in ("data", "account", "player", "result", "user"):
-        if isinstance(info_json.get(key), dict):
-            info_json = info_json[key]
-            break
-
-    def pick(*names, default=None):
-        for n in names:
-            if n in info_json and info_json[n] not in (None, ""):
-                return info_json[n]
-        return default
-
-    return {
-        "nickname": pick("nickname", "PlayerNickname", "name", "Name"),
-        "likes": pick("likes", "Likes", "likeCount", "totalLikes"),
-        "level": pick("level", "Level", "accountLevel"),
-        "region": pick("region", "Region", "server"),
-        "uid": pick("uid", "UID", "id") or str(uid),
-        "headPic": pick("headPic", "headpic", "avatar", "avatarId", "HeadPic"),
-        "exp": pick("exp", "Exp", "experience"),
-        "rank": pick("rank", "Rank", "brRank", "BRRank"),
-        "csRank": pick("csRank", "CSRank", "cs_rank"),
-        "clanName": pick("clanName", "ClanName", "guildName", "GuildName"),
-        "clanId": pick("clanId", "ClanId", "guildId", "GuildId"),
-        "clanLevel": pick("clanLevel", "ClanLevel", "guildLevel"),
-        "clanLeaderName": pick("clanLeaderName", "ClanLeaderName", "leaderName"),
-        "clanLeaderUid": pick("clanLeaderUid", "ClanLeaderUid", "leaderUid"),
-        "signature": pick("signature", "Signature", "bio"),
-        "creditScore": pick("creditScore", "CreditScore", "credit"),
-        "lastLogin": pick("lastLogin", "LastLogin"),
-        "created": pick("created", "Created", "createdAt"),
-        "accountAge": pick("accountAge", "AccountAge"),
-    }
-
-
-def fetch_and_store_info_for_uid(uid, server_name, jwt=None):
-    if not jwt:
-        jwt = get_global_jwt()
-    if not jwt:
-        print(f"[INFO] no JWT available for {uid}")
+        return {
+            "uid": _int(ai.get("UID"), uid),
+            "nickname": _str(ai.get("PlayerNickname", "")),
+            "level": _int(ai.get("Level", 0)),
+            "likes": _int(ai.get("Likes", 0)),
+            "region": _str(ai.get("Region", server)),
+            "headPic": _int(ai.get("HeadPic", 0)),
+            "rank": _int(ai.get("BrRankPoint", 0)),
+            "csRank": _int(ai.get("CsRankPoint", 0)),
+            "creditScore": _int(ai.get("CreditScore", 0)),
+            "clanName": _str(ai.get("ClanName", "")),
+            "clanId": _str(ai.get("ClanId", "")),
+            "clanLevel": _int(ai.get("ClanLevel", 0)),
+            "clanLeaderName": _str(ai.get("ClanLeaderName", "")),
+            "clanLeaderUid": _str(ai.get("ClanLeaderUID", "")),
+            "signature": _str(ai.get("Signature", "")),
+            "lastLogin": _str(ai.get("LastLogin", "")),
+            "created": _str(ai.get("CreateTime", "")),
+            "accountAge": _str(ai.get("AccountAge", "")),
+            "raw": js,
+        }
+    except Exception as e:
+        print(f"[parse_full] err: {e}")
         return None
-
-    raw = _fetch_info_api(jwt, uid)
-    player = _extract_player_info(raw.get("info") or {}, uid)
-
-    db = _load_info_db()
-    rec = {
-        "uid": str(uid),
-        "server_name": server_name.upper(),
-        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "player": player,
-        "info": raw.get("info"),
-        "duo": raw.get("duo"),
-    }
-    db["records"][str(uid)] = rec
-    db["last_run"] = rec["fetched_at"]
-    _save_info_db(db)
-    return rec
-
-
-def fetch_and_store_all_info(force=False):
-    targets = load_auto_targets()
-    db = _load_info_db()
-    today = _today_str()
-    jwt = get_global_jwt()
-
-    if not jwt:
-        print("[INFO] No JWT available — skipping info fetch")
-        return {"ok": False, "error": "no JWT available"}
-
-    fetched = 0
-    skipped = 0
-    errors = 0
-
-    for srv, uids in targets.items():
-        if not uids:
-            continue
-        for uid in uids:
-            existing = db["records"].get(str(uid))
-            if (not force) and existing and existing.get("fetched_at", "").startswith(today):
-                skipped += 1
-                continue
-            try:
-                rec = fetch_and_store_info_for_uid(uid, srv, jwt)
-                if rec:
-                    fetched += 1
-                    print(f"[INFO] {srv} {uid} → fetched")
-                else:
-                    errors += 1
-            except Exception as e:
-                errors += 1
-                print(f"[INFO] {srv} {uid} error: {e}")
-            time.sleep(0.5)
-
-    print(f"[INFO] done. fetched={fetched} skipped={skipped} errors={errors}")
-    return {"ok": True, "fetched": fetched, "skipped": skipped, "errors": errors}
 
 
 # ============================================================
@@ -738,13 +812,6 @@ _api_key_ctx = threading.local()
 
 
 def do_like(uid, server_name, tier="user"):
-    # Blocked UID check
-    if is_blocked_uid(uid):
-        return {
-            "error": "This UID is blocked by master.",
-            "blocked": True,
-        }
-
     api_key = "_auto_" if tier == "auto" else getattr(_api_key_ctx, "key", "")
 
     allowed, remaining, reset_at = check_and_consume_quota(api_key, uid, tier)
@@ -771,8 +838,6 @@ def do_like(uid, server_name, tier="user"):
     encrypted = enc(uid)
     before = parse_account_info(make_request(encrypted, server_name, token))
     if before is None:
-        # log even if unknown
-        log_usage_detail(api_key, uid, server_name, "Unknown", 0)
         return {
             "LikesGivenByAPI": 0, "LikesafterCommand": 0, "LikesbeforeCommand": 0,
             "PlayerNickname": "Unknown",
@@ -786,12 +851,21 @@ def do_like(uid, server_name, tier="user"):
     url = like_url_for(server_name)
     send_likes_from_all_tokens(uid, server_name, url, tokens)
 
-    after = parse_account_info(make_request(encrypted, server_name, token)) or {
+    after_pb = make_request(encrypted, server_name, token)
+    after = parse_account_info(after_pb) or {
         "likes": before["likes"], "uid": before["uid"], "name": before["name"]
     }
     like_given = max(0, int(after["likes"]) - int(before["likes"]))
 
-    log_usage_detail(api_key, uid, server_name, after["name"], like_given)
+    # Log to DB
+    try:
+        db_save_like_activity(
+            uid=uid, api_key=api_key, server=server_name,
+            likes_given=like_given, requests_count=1,
+            nickname=after.get("name")
+        )
+    except Exception as e:
+        print(f"[db] like activity save err: {e}")
 
     return {
         "LikesGivenByAPI": like_given,
@@ -811,12 +885,74 @@ def do_like(uid, server_name, tier="user"):
 
 
 # ============================================================
+#  INFO FETCH (once per day per UID)
+# ============================================================
+def fetch_and_store_info_for_server(srv, tokens, uids):
+    """Fetch full player info for all auto UIDs on a server, store in DB.
+    RULE: ONE fetch per UID per day — checked via DB date column."""
+    if not tokens or not uids:
+        return 0
+
+    today = _today_str()
+    token = tokens[0]
+    url_show = show_url_for(srv)
+    saved = 0
+
+    for uid in uids:
+        try:
+            # Skip if already fetched today
+            existing = db_get_player_info(uid, date=today)
+            if existing:
+                continue
+
+            encrypted = enc(uid)
+            pb = make_request(encrypted, srv, token)
+            if pb is None:
+                continue
+            info = parse_full_player_info(pb, uid, srv)
+            if not info:
+                continue
+            db_save_player_info(uid, srv, info, source="daily")
+            saved += 1
+            print(f"[INFO] {srv} {uid} → {info.get('nickname')} L{info.get('level')} ❤{info.get('likes')}")
+            time.sleep(0.3)  # gentle rate-limit
+        except Exception as e:
+            print(f"[INFO] {srv} {uid} err: {e}")
+            continue
+    return saved
+
+
+def do_daily_info_fetch():
+    """Runs AFTER auto-like. Fetches info for every auto UID (once/day)."""
+    print(f"\n[INFO-FETCH] start {datetime.now():%Y-%m-%d %H:%M:%S}")
+    targets = load_auto_targets()
+    total_saved = 0
+    for srv, uids in targets.items():
+        if not uids:
+            continue
+        try:
+            tokens = get_or_refresh_tokens(srv)
+            if not tokens:
+                print(f"[INFO-FETCH] {srv}: no tokens")
+                continue
+            n = fetch_and_store_info_for_server(srv, tokens, uids)
+            total_saved += n
+            print(f"[INFO-FETCH] {srv}: saved {n}")
+        except Exception as e:
+            print(f"[INFO-FETCH] {srv} err: {e}")
+    print(f"[INFO-FETCH] done. total saved={total_saved}\n")
+    return total_saved
+
+
+# ============================================================
 #  AUTO-LIKE
 # ============================================================
 def do_auto_like_now():
     print(f"\n[AUTO-LIKE] start {datetime.now():%Y-%m-%d %H:%M:%S}")
     targets = load_auto_targets()
     total = 0
+    total_uids = 0
+    details = {}
     for srv, uids in targets.items():
         if not uids:
             continue
@@ -826,27 +962,37 @@ def do_auto_like_now():
                 print(f"[AUTO-LIKE] {srv}: no tokens")
                 continue
             url = like_url_for(srv)
+            srv_count = 0
             for uid in uids:
-                if is_blocked_uid(uid):
-                    print(f"[AUTO-LIKE] {srv} {uid} → SKIPPED (blocked)")
+                # skip blocked
+                if db_is_blocked(uid):
                     continue
                 try:
                     ok = send_likes_from_all_tokens(uid, srv, url, tokens)
                     total += ok
+                    srv_count += ok
+                    total_uids += 1
                     print(f"[AUTO-LIKE] {srv} {uid} → {ok}")
                 except Exception as e:
                     print(f"[AUTO-LIKE] {srv} {uid} err: {e}")
                 time.sleep(0.5)
+            details[srv] = srv_count
         except Exception as e:
             print(f"[AUTO-LIKE] {srv} err: {e}")
+
+    # Save summary
+    try:
+        db_save_run_summary(total, total_uids, details)
+    except Exception as e:
+        print(f"[db] run summary save err: {e}")
+
     print(f"[AUTO-LIKE] done. total={total}\n")
 
-    # Fetch & store player info (once per day)
+    # After like → fetch & store info (once per uid/day)
     try:
-        print("[AUTO-LIKE] fetching info for all targets...")
-        fetch_and_store_all_info()
+        do_daily_info_fetch()
     except Exception as e:
-        print(f"[AUTO-LIKE] info fetch error: {e}")
+        print(f"[INFO-FETCH] err: {e}")
 
     return total
 
@@ -954,12 +1100,13 @@ def route_health():
         "tg": TELEGRAM,
         "tiktok": TIKTOK,
         "jwt_api": JWT_API_BASE,
-        "info_api": INFO_API_BASE,
         "servers": list(SERVER_ACCOUNT_FILES.keys()),
         "auto_like_at": f"{AUTO_LIKE_HOUR:02d}:{AUTO_LIKE_MINUTE:02d}",
+        "info_fetch_at": f"{INFO_FETCH_HOUR:02d}:{INFO_FETCH_MINUTE:02d}",
         "jwt_refresh_hours": JWT_REFRESH_HOURS,
         "daily_limit_user": DAILY_LIMIT_USER,
         "auto_targets_loaded": {k: len(v) for k, v in load_auto_targets().items()},
+        "db_path": DB_PATH,
         "endpoints": {
             "short": "/mahir&like?uid={uid}&key={key}",
             "short_server": "/mahir&like?uid={uid}&key={key}&server_name={server}",
@@ -983,6 +1130,8 @@ def handle_like():
             return jsonify({"error": "UID and server_name required"}), 400
         if server_name not in SERVER_ACCOUNT_FILES:
             return jsonify({"error": f"Unsupported server '{server_name}'"}), 400
+        if db_is_blocked(uid):
+            return jsonify({"error": "This UID is blocked"}), 403
 
         _api_key_ctx.key = api_key
         try:
@@ -994,8 +1143,6 @@ def handle_like():
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
-            if result.get("blocked"):
-                return jsonify(result), 403
             return jsonify(result), 500
         return jsonify(result)
     except Exception as e:
@@ -1033,6 +1180,9 @@ def mahir_like():
                 "default": "BD"
             }), 400
 
+        if db_is_blocked(uid):
+            return jsonify({"error": "This UID is blocked", "Owner": OWNER_HANDLE}), 403
+
         _api_key_ctx.key = api_key
         try:
             register_auto_uid(server_name, uid)
@@ -1043,8 +1193,6 @@ def mahir_like():
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
-            if result.get("blocked"):
-                return jsonify(result), 403
             return jsonify(result), 500
         return jsonify(result)
     except Exception as e:
@@ -1063,6 +1211,16 @@ def cron_auto_like():
     if secret != expected:
         return jsonify({"error": "forbidden"}), 403
     threading.Thread(target=do_auto_like_now, daemon=True).start()
+    return jsonify({"ok": True, "triggered": True})
+
+
+@app.get("/cron/info_fetch")
+def cron_info_fetch():
+    secret = request.args.get("secret", "")
+    expected = os.environ.get("CRON_SECRET", "mahir-cron-2025")
+    if secret != expected:
+        return jsonify({"error": "forbidden"}), 403
+    threading.Thread(target=do_daily_info_fetch, daemon=True).start()
     return jsonify({"ok": True, "triggered": True})
 
 
@@ -1265,13 +1423,17 @@ def master_auto_add():
 
     register_auto_uid(srv, uid)
 
-    # Immediately fetch info for this new UID (async-ish)
-    def _bg():
-        try:
-            fetch_and_store_info_for_uid(uid, srv)
-        except Exception as e:
-            print(f"[auto/add] info fetch warn: {e}")
-    threading.Thread(target=_bg, daemon=True).start()
+    # Try to fetch and store info immediately
+    try:
+        tokens = get_or_refresh_tokens(srv)
+        if tokens:
+            encrypted = enc(uid)
+            pb = make_request(encrypted, srv, tokens[0])
+            info = parse_full_player_info(pb, uid, srv)
+            if info:
+                db_save_player_info(uid, srv, info, source="manual")
+    except Exception as e:
+        print(f"[auto/add] info fetch warn: {e}")
 
     return _jsonify({"ok": True, "auto_targets": load_auto_targets()})
 
@@ -1292,12 +1454,6 @@ def master_auto_remove():
     if srv in targets and uid in targets[srv]:
         targets[srv].remove(uid)
         save_auto_targets(targets)
-
-    # Also remove from info DB
-    db = _load_info_db()
-    if uid in db.get("records", {}):
-        del db["records"][uid]
-        _save_info_db(db)
 
     return _jsonify({"ok": True, "auto_targets": targets})
 
@@ -1326,56 +1482,84 @@ def master_auto_clear():
 
 
 # ============================================================
-#  AUTO-WITH-INFO  (targets + cached info + last run)
+#  AUTO WITH INFO (NEW)
 # ============================================================
 @app.get("/master/api/auto-with-info")
 def master_auto_with_info():
     """
-    Returns:
-      {
-        auto_with_info: { "BD": [ {uid, nickname, level, likes, avatarUrl, ...} ] },
-        last_run_summary: { last_run: "YYYY-MM-DD HH:MM:SS" }
-      }
+    Returns auto targets enriched with DB info per server.
+    Frontend renders beautiful cards from this.
     """
     key = request.args.get("key", "").strip()
     if not _master_required(key):
         return jsonify({"error": "master key required"}), 403
 
     targets = load_auto_targets()
-    db = _load_info_db()
-    records = db.get("records", {})
-    blocked = _load_blocked()
+    last_run = db_get_last_run()
 
-    out = {}
+    result = {}
     for srv, uids in targets.items():
         rows = []
         for uid in uids:
-            rec = records.get(str(uid)) or {}
-            player = rec.get("player") or {}
-            rows.append({
-                "uid": str(uid),
-                "nickname": player.get("nickname"),
-                "level": player.get("level"),
-                "likes": player.get("likes"),
-                "region": player.get("region") or srv,
-                "headPic": player.get("headPic"),
-                "clanName": player.get("clanName"),
-                "clanId": player.get("clanId"),
-                "avatarUrl": None,
-                "info_date": (rec.get("fetched_at") or "")[:10],
-                "is_blocked": str(uid) in blocked,
-                "last_likes_given": None,  # can be enhanced later
-            })
-        out[srv] = rows
+            info = db_get_player_info(uid)
+            activity = db_get_like_activity(uid)
+            blocked = db_is_blocked(uid)
+
+            if info:
+                rows.append({
+                    "uid": uid,
+                    "server": srv,
+                    "nickname": info.get("nickname") or "Unknown",
+                    "level": info.get("level") or 0,
+                    "likes": info.get("likes") or 0,
+                    "region": info.get("region") or srv,
+                    "headPic": info.get("head_pic"),
+                    "clanName": info.get("clan_name") or "",
+                    "clanId": info.get("clan_id") or "",
+                    "info_date": info.get("date"),
+                    "source": info.get("source"),
+                    "is_blocked": blocked,
+                    "last_likes_given": (activity.get("likes_given") if activity else None),
+                    "last_like_at": (activity.get("last_at") if activity else None),
+                })
+            else:
+                rows.append({
+                    "uid": uid,
+                    "server": srv,
+                    "nickname": "Unknown",
+                    "level": 0,
+                    "likes": 0,
+                    "region": srv,
+                    "headPic": None,
+                    "clanName": "",
+                    "clanId": "",
+                    "info_date": None,
+                    "source": None,
+                    "is_blocked": blocked,
+                    "last_likes_given": (activity.get("likes_given") if activity else None),
+                    "last_like_at": (activity.get("last_at") if activity else None),
+                })
+        result[srv] = rows
+
+    summary = {}
+    if last_run:
+        try:
+            summary = {
+                "last_run": last_run.get("run_at", "")[:16].replace("T", " "),
+                "total_likes": last_run.get("total_likes", 0),
+                "total_uids": last_run.get("total_uids", 0),
+            }
+        except Exception:
+            pass
 
     return _jsonify({
-        "auto_with_info": out,
-        "last_run_summary": {"last_run": db.get("last_run")},
+        "auto_with_info": result,
+        "last_run_summary": summary,
     })
 
 
 # ============================================================
-#  PLAYER INFO  (single UID — from cache; no fresh fetch)
+#  PLAYER INFO (NEW)
 # ============================================================
 @app.get("/master/api/player-info")
 def master_player_info():
@@ -1384,59 +1568,108 @@ def master_player_info():
         return jsonify({"error": "master key required"}), 403
 
     uid = request.args.get("uid", "").strip()
-    if not uid:
-        return jsonify({"error": "uid required"}), 400
+    if not uid.isdigit():
+        return jsonify({"error": "valid uid required"}), 400
 
-    db = _load_info_db()
-    rec = db.get("records", {}).get(str(uid), {})
-    player = rec.get("player") or {}
+    info = db_get_player_info(uid)
+    history = db_get_player_history(uid, days=14)
+    activity = db_get_like_activity(uid)
+    blocked = db_is_blocked(uid)
 
-    # Today's like activity from usage detail
-    today = _today_str()
-    usage_db = _load_usage_detail()
-    day = usage_db.get(today, {})
-    activity = []
-    for k, v in day.items():
-        if v.get("uid") == str(uid):
-            activity.append({
-                "api_key": v.get("api_key"),
-                "requests": v.get("requests"),
-                "likes_given_total": v.get("likes_given_total"),
-                "last_at": v.get("last_at"),
-            })
+    # Find server for this uid from auto targets
+    targets = load_auto_targets()
+    srv = ""
+    for s, uids in targets.items():
+        if uid in uids:
+            srv = s
+            break
+
+    if not info and not srv:
+        return jsonify({"error": "no info found for this UID"}), 404
+
+    # If no DB info, try live fetch
+    if not info and srv:
+        try:
+            tokens = get_or_refresh_tokens(srv)
+            if tokens:
+                encrypted = enc(uid)
+                pb = make_request(encrypted, srv, tokens[0])
+                live = parse_full_player_info(pb, uid, srv)
+                if live:
+                    db_save_player_info(uid, srv, live, source="live")
+                    info = db_get_player_info(uid)
+        except Exception as e:
+            print(f"[player-info live] err: {e}")
+
+    if not info:
+        return jsonify({"error": "no info available"}), 404
+
+    # Build response
+    avatarUrl = None
+    if info.get("head_pic"):
+        avatarUrl = f"https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/{info['head_pic']}.png"
+
+    # Activity history
+    today_like_activity = []
+    if activity:
+        today_like_activity.append({
+            "api_key": activity.get("api_key") or "—",
+            "likes_given_total": activity.get("likes_given", 0),
+            "requests": activity.get("requests", 0),
+            "last_at": activity.get("last_at", ""),
+        })
+
+    # Daily snapshots
+    history_days = []
+    history_map = {}
+    for h in history:
+        d = h.get("date")
+        if d:
+            history_days.append(d)
+            history_map[d] = {
+                "snapshots": [{
+                    "snapshot": {
+                        "likes": h.get("likes"),
+                        "level": h.get("level"),
+                        "nickname": h.get("nickname"),
+                    },
+                    "source": h.get("source"),
+                    "likes_given": None,
+                }],
+                "last_at": h.get("created_at", "")[:16].replace("T", " "),
+            }
 
     return _jsonify({
-        "uid": str(uid),
-        "nickname": player.get("nickname"),
-        "level": player.get("level"),
-        "likes": player.get("likes"),
-        "region": player.get("region"),
-        "headPic": player.get("headPic"),
-        "avatarUrl": None,
-        "rank": player.get("rank"),
-        "csRank": player.get("csRank"),
-        "clanName": player.get("clanName"),
-        "clanId": player.get("clanId"),
-        "clanLevel": player.get("clanLevel"),
-        "clanLeaderName": player.get("clanLeaderName"),
-        "clanLeaderUid": player.get("clanLeaderUid"),
-        "signature": player.get("signature"),
-        "creditScore": player.get("creditScore"),
-        "lastLogin": player.get("lastLogin"),
-        "created": player.get("created"),
-        "accountAge": player.get("accountAge"),
-        "is_blocked": is_blocked_uid(uid),
-        "today_like_activity": activity,
-        "history_days": [],
-        "history": {},
-        "fetched_at": rec.get("fetched_at"),
-        "raw_info": rec.get("info"),
-        "raw_duo": rec.get("duo"),
+        "uid": int(info.get("uid") or uid),
+        "nickname": info.get("nickname") or "Unknown",
+        "level": info.get("level") or 0,
+        "likes": info.get("likes") or 0,
+        "region": info.get("region") or srv,
+        "headPic": info.get("head_pic"),
+        "avatarUrl": avatarUrl,
+        "rank": info.get("rank"),
+        "csRank": info.get("cs_rank"),
+        "creditScore": info.get("credit_score"),
+        "clanName": info.get("clan_name"),
+        "clanId": info.get("clan_id"),
+        "clanLevel": info.get("clan_level"),
+        "clanLeaderName": info.get("clan_leader_name"),
+        "clanLeaderUid": info.get("clan_leader_uid"),
+        "signature": info.get("signature"),
+        "lastLogin": info.get("last_login"),
+        "created": info.get("created"),
+        "accountAge": info.get("account_age"),
+        "is_blocked": blocked,
+        "server": srv,
+        "info_date": info.get("date"),
+        "today_like_activity": today_like_activity,
+        "history_days": history_days,
+        "history": history_map,
     })
 
 
 # ============================================================
-#  USAGE DETAIL  (per-day table)
+#  USAGE DETAIL (NEW)
 # ============================================================
 @app.get("/master/api/usage-detail")
 def master_usage_detail():
@@ -1444,55 +1677,79 @@ def master_usage_detail():
     if not _master_required(key):
         return jsonify({"error": "master key required"}), 403
 
-    date = request.args.get("date", "").strip() or _today_str()
-    db = _load_usage_detail()
-    day = db.get(date, {})
-    rows = list(day.values())
-    rows.sort(key=lambda r: r.get("last_at", ""), reverse=True)
-    return _jsonify({"date": date, "rows": rows})
+    date = request.args.get("date", _today_str())
+
+    with db_lock:
+        conn = _db_connect()
+        c = conn.cursor()
+        c.execute("""
+            SELECT uid, api_key, server, likes_given, requests, last_at, nickname
+            FROM like_activity WHERE date=?
+            ORDER BY last_at DESC
+        """, (date,))
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+
+    formatted = []
+    for r in rows:
+        formatted.append({
+            "uid": r["uid"],
+            "api_key": r.get("api_key") or "—",
+            "nickname": r.get("nickname") or "—",
+            "server": r.get("server") or "—",
+            "requests": r.get("requests", 0),
+            "likes_given_total": r.get("likes_given", 0),
+            "last_at": r.get("last_at") or "—",
+        })
+
+    return _jsonify({"date": date, "rows": formatted})
 
 
 # ============================================================
-#  BLOCKED  (list / add / remove)
+#  BLOCKED UIDs (NEW)
 # ============================================================
 @app.get("/master/api/blocked")
 def master_blocked_list():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
         return jsonify({"error": "master key required"}), 403
-    return _jsonify({"blocked": sorted(list(_load_blocked()))})
+
+    rows = db_get_blocked()
+    return _jsonify({
+        "blocked": [r["uid"] for r in rows],
+        "details": rows,
+    })
 
 
 @app.post("/master/api/block")
-def master_block_add():
+def master_block():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
         return jsonify({"error": "master key required"}), 403
-    uid = str(data.get("uid", "")).strip()
-    if not uid.isdigit():
-        return jsonify({"error": "uid required"}), 400
 
-    s = _load_blocked()
-    s.add(uid)
-    _save_blocked(s)
-    return _jsonify({"ok": True, "blocked": sorted(list(s))})
+    uid = str(data.get("uid", "")).strip()
+    reason = str(data.get("reason", "")).strip()
+    if not uid.isdigit():
+        return jsonify({"error": "valid uid required"}), 400
+
+    db_block_uid(uid, reason)
+    return _jsonify({"ok": True, "uid": uid})
 
 
 @app.post("/master/api/unblock")
-def master_block_remove():
+def master_unblock():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
         return jsonify({"error": "master key required"}), 403
-    uid = str(data.get("uid", "")).strip()
-    if not uid:
-        return jsonify({"error": "uid required"}), 400
 
-    s = _load_blocked()
-    s.discard(uid)
-    _save_blocked(s)
-    return _jsonify({"ok": True, "blocked": sorted(list(s))})
+    uid = str(data.get("uid", "")).strip()
+    if not uid.isdigit():
+        return jsonify({"error": "valid uid required"}), 400
+
+    db_unblock_uid(uid)
+    return _jsonify({"ok": True, "uid": uid})
 
 
 # ============================================================
@@ -1536,7 +1793,7 @@ def master_save_keys():
 
 
 # ============================================================
-#  STATS
+#  STATS / ACTIONS
 # ============================================================
 @app.get("/master/api/stats")
 def master_stats():
@@ -1574,11 +1831,7 @@ def master_stats():
         else:
             jwt_status[srv] = {"tokens": 0, "age_seconds": None}
 
-    info_db = _load_info_db()
-    info_stats = {
-        "total_records": len(info_db.get("records", {})),
-        "last_run": info_db.get("last_run"),
-    }
+    blocked_count = len(db_get_blocked())
 
     return _jsonify({
         "today": today,
@@ -1592,14 +1845,10 @@ def master_stats():
             "user": len(get_allowed_keys()),
             "master": len(get_admin_keys()),
         },
-        "info_db": info_stats,
-        "blocked_count": len(_load_blocked()),
+        "blocked_count": blocked_count,
     })
 
 
-# ============================================================
-#  ACTIONS
-# ============================================================
 @app.post("/master/api/run-auto")
 def master_run_auto():
     data = request.get_json(silent=True) or {}
@@ -1608,6 +1857,16 @@ def master_run_auto():
         return jsonify({"error": "master key required"}), 403
     threading.Thread(target=do_auto_like_now, daemon=True).start()
     return _jsonify({"ok": True, "message": "auto-like triggered"})
+
+
+@app.post("/master/api/run-info-fetch")
+def master_run_info_fetch():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or request.args.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+    threading.Thread(target=do_daily_info_fetch, daemon=True).start()
+    return _jsonify({"ok": True, "message": "info fetch triggered"})
 
 
 @app.post("/master/api/jwt-refresh")
@@ -1628,76 +1887,11 @@ def master_jwt_refresh():
 
 
 # ============================================================
-#  INFO DB APIs
-# ============================================================
-@app.get("/master/api/info-db")
-def master_info_db():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
-
-    srv = request.args.get("server_name", "").upper().strip()
-    db = _load_info_db()
-    records = db.get("records", {})
-
-    if srv:
-        records = {k: v for k, v in records.items()
-                   if v.get("server_name") == srv}
-
-    return _jsonify({
-        "ok": True,
-        "last_run": db.get("last_run"),
-        "count": len(records),
-        "records": records,
-    })
-
-
-@app.post("/master/api/info-db/clear")
-def master_info_db_clear():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
-
-    srv = str(data.get("server_name", "")).upper().strip()
-    db = _load_info_db()
-
-    if not srv or srv == "ALL":
-        db = {"records": {}, "last_run": None}
-    else:
-        if srv not in SERVER_ACCOUNT_FILES:
-            return jsonify({"error": f"invalid server_name '{srv}'"}), 400
-        db["records"] = {k: v for k, v in db.get("records", {}).items()
-                         if v.get("server_name") != srv}
-
-    _save_info_db(db)
-    return _jsonify({"ok": True, "cleared": srv or "ALL",
-                     "remaining": len(db.get("records", {}))})
-
-
-@app.post("/master/api/info-db/fetch")
-def master_info_db_fetch():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or request.args.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master key required"}), 403
-
-    force = str(data.get("force", "")).lower() in ("1", "true", "yes")
-
-    def _run():
-        try:
-            fetch_and_store_all_info(force=force)
-        except Exception as e:
-            print(f"[info-db/fetch] error: {e}")
-
-    threading.Thread(target=_run, daemon=True).start()
-    return _jsonify({"ok": True, "message": "info fetch triggered",
-                     "force": force})
-
-
-# ============================================================
 #  ENTRY
 # ============================================================
+init_db()
+print(f"[*] DB initialized at {DB_PATH}")
+
 if __name__ == "__main__":
     start_background_jobs()
     port = int(os.environ.get("PORT", 5000))
