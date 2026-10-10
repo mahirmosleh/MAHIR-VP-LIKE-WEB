@@ -1,18 +1,18 @@
-# app.py — MAHIR VIP LIKE — Complete Backend with Master Panel
-# ==========================================================
+# app.py — MAHIR VIP LIKE — Complete Backend with Master Panel + Info DB + Blocklist
+# ==================================================================================
 #  Web:
 #    /              → User UI
-#    /master        → Master Admin Panel (password: OWNER-MAHIR)
+#    /master        → Master Admin Panel
 #
 #  Public APIs:
-#    /mahir&like?uid={uid}&key={key}                    ← SHORT (default BD)
-#    /mahir&like?uid={uid}&key={key}&server_name=IND    ← SHORT + server
-#    /like?uid={uid}&server_name={server}&key={key}     ← FULL
+#    /mahir&like?uid={uid}&key={key}
+#    /mahir&like?uid={uid}&key={key}&server_name=IND
+#    /like?uid={uid}&server_name={server}&key={key}
 #    /health
 #    /auto/list
 #    /cron/auto_like?secret={secret}
 #
-#  Master APIs (password: OWNER-MAHIR):
+#  Master APIs:
 #    GET    /master/api/files
 #    GET    /master/api/file?name=auto.txt
 #    POST   /master/api/file
@@ -21,27 +21,26 @@
 #    POST   /master/api/auto/add
 #    POST   /master/api/auto/remove
 #    POST   /master/api/auto/clear
+#    GET    /master/api/auto-with-info        ← NEW
+#    GET    /master/api/player-info?uid=X     ← NEW
+#    GET    /master/api/usage-detail?date=Y   ← NEW
+#    GET    /master/api/blocked               ← NEW
+#    POST   /master/api/block                 ← NEW
+#    POST   /master/api/unblock               ← NEW
+#    GET    /master/api/info-db               ← NEW
+#    POST   /master/api/info-db/clear         ← NEW
+#    POST   /master/api/info-db/fetch         ← NEW
 #    GET    /master/api/keys
 #    POST   /master/api/keys
 #    GET    /master/api/stats
 #    POST   /master/api/run-auto
 #    POST   /master/api/jwt-refresh
-#    GET    /master/api/usage-detail
-#    GET    /master/api/blocked
-#    POST   /master/api/block
-#    POST   /master/api/unblock
-#    GET    /master/api/player-info?uid=
-#    GET    /master/api/info-store
-#    GET    /master/api/info-store/history?uid=
-#    POST   /master/api/info-store/refresh?uid=
-#    GET    /master/api/auto-with-info
-# ==========================================================
+# ==================================================================================
 
 import os
 import sys
 import json
 import time
-import base64
 import binascii
 import asyncio
 import threading
@@ -49,8 +48,7 @@ from threading import RLock
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import (Flask, request, jsonify, Response, render_template,
-                   send_from_directory, abort)
+from flask import (Flask, request, jsonify, Response, render_template)
 from flask_cors import CORS
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -103,16 +101,14 @@ AUTO_LIKE_HOUR    = 4
 AUTO_LIKE_MINUTE  = 10
 DAILY_LIMIT_USER  = 1
 
-# 🆕 Direct Info fetch — no external API
-INFO_BOT_UID      = "4225611772"
-INFO_BOT_PW       = "BY_UNKNOWN-ID4JZZPL8-GHOST"   # ← change if needed
+INFO_API_BASE     = "https://mahir-info-api.vercel.app"
 
-# 🆕 CDN for avatars
-ICON_CDN_BASE     = "https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG"
-ICON_CDN_URL      = ICON_CDN_BASE + "/{head_pic}.png"
-
-# Master panel password — ONLY this
-MASTER_PASSWORD = "OWNER-MAHIR"
+INFO_DB_PATH      = os.path.join("/tmp", "mahir_info_db.json")
+USAGE_DB_PATH     = os.path.join("/tmp", "mahir_usage_detail.json")
+BLOCKED_DB_PATH   = os.path.join("/tmp", "mahir_blocked.json")
+INFO_DB_LOCK      = RLock()
+USAGE_DB_LOCK     = RLock()
+BLOCKED_DB_LOCK   = RLock()
 
 SERVER_ACCOUNT_FILES = {
     "BD":  "account_bd.txt",
@@ -135,153 +131,14 @@ EDITABLE_FILES = [
 ]
 
 CONFIG_RO_PATH = os.path.join(BASE_DIR, "keys.json")
-CONFIG_RW_PATH = os.path.join(BASE_DIR, "keys_rw.json")
-USAGE_PATH     = os.path.join(BASE_DIR, "mahir_usage.json")
-USAGE_DETAIL_PATH = os.path.join(BASE_DIR, "mahir_usage_detail.json")
-BLOCKED_UIDS_PATH = os.path.join(BASE_DIR, "mahir_blocked_uids.json")
+CONFIG_RW_PATH = os.path.join("/tmp", "keys.json")
+USAGE_PATH     = os.path.join("/tmp", "mahir_usage.json")
 AUTO_FILE      = os.path.join(BASE_DIR, "auto.txt")
-
-# 🆕 Info store (per-UID daily snapshot + history)
-INFO_STORE_PATH   = os.path.join(BASE_DIR, "mahir_info_store.json")
-INFO_HISTORY_PATH = os.path.join(BASE_DIR, "mahir_info_history.json")
-INFO_STORE_LOCK   = RLock()
 
 config_lock = RLock()
 usage_lock  = RLock()
 jwt_lock    = RLock()
 file_lock   = RLock()
-
-# ============================================================
-#  🆕 INFO — DIRECT FETCH (from xInFo.py logic, no external API)
-# ============================================================
-try:
-    import AccountPersonalShow_pb2 as apsPb
-    import main_pb2 as mPb
-    from google.protobuf import json_format
-    from cachetools import TTLCache
-    from xH import gJwt
-    _INFO_DIRECT_AVAILABLE = True
-except Exception as _info_import_err:
-    print(f"[INFO] direct modules unavailable: {_info_import_err}")
-    _INFO_DIRECT_AVAILABLE = False
-
-# Token cache for info bot (4h)
-try:
-    _info_jwt_cache = TTLCache(maxsize=10, ttl=4 * 60 * 60)
-    _info_data_cache = TTLCache(maxsize=200, ttl=300)
-except Exception:
-    _info_jwt_cache = {}
-    _info_data_cache = {}
-
-_OB_VERSION_CACHE = {"version": None, "timestamp": 0}
-_OB_VERSION_TTL = 3600
-
-
-def _get_ob_version():
-    """Fetch latest OB version (cached 1h)"""
-    now = time.time()
-    if (_OB_VERSION_CACHE["version"]
-            and (now - _OB_VERSION_CACHE["timestamp"]) < _OB_VERSION_TTL):
-        return _OB_VERSION_CACHE["version"]
-    try:
-        url = ("https://version.ggwhitehawk.com//live/ver.php?version=1.3.0"
-               "&lang=ar&device=android&channel=android&appstore=googleplay"
-               "&region=ME&whitelist_version=1.3.0&whitelist_sp_version=1.0.0"
-               "&device_name=google%20G011A&device_CPU=ARMv7%20VFPv3%20NEON%20VMH"
-               "&device_GPU=Adreno%20(TM)%20640&device_mem=1993")
-        r = requests.get(url, timeout=10, verify=False)
-        data = r.json()
-        ob = data.get("latest_release_version")
-        if ob:
-            _OB_VERSION_CACHE["version"] = ob
-            _OB_VERSION_CACHE["timestamp"] = now
-            return ob
-    except Exception as e:
-        print(f"[INFO] ob version err: {e}")
-    return "ob"
-
-
-def _get_info_token():
-    """Bot JWT for info fetches"""
-    key = "jwt_info"
-    try:
-        if key in _info_jwt_cache:
-            return _info_jwt_cache[key]
-    except Exception:
-        pass
-    tok = gJwt(INFO_BOT_UID, INFO_BOT_PW)
-    try:
-        _info_jwt_cache[key] = tok
-    except Exception:
-        pass
-    return tok
-
-
-def _enc_info_payload(uid):
-    """Encrypt GetPlayerPersonalShow payload (AES-CBC)"""
-    mK = base64.b64decode('WWcmdGMlREV1aDYlWmNeOA==')
-    mIV = base64.b64decode('Nm95WkRyMjJFM3ljaGpNJQ==')
-    m = mPb.GetPlayerPersonalShow()
-    m.a = int(uid)
-    m.b = 7
-    raw = m.SerializeToString()
-    n = AES.block_size - (len(raw) % AES.block_size)
-    return AES.new(mK, AES.MODE_CBC, mIV).encrypt(raw + bytes([n] * n))
-
-
-def _fetch_info_direct(uid: str, timeout: int = 30) -> dict:
-    """Direct xInFo-style info fetch — NO external API"""
-    if not _INFO_DIRECT_AVAILABLE:
-        return {}
-
-    # cache hit
-    ck = str(uid)
-    try:
-        if ck in _info_data_cache:
-            return _info_data_cache[ck]
-    except Exception:
-        pass
-
-    try:
-        tok = _get_info_token()
-        payload = _enc_info_payload(uid)
-        headers = {
-            "Host": "clientbp.ppmainecoonghj.com",
-            "X-Unity-Version": "2018.4.12f1",
-            "Accept": "*/*",
-            "Authorization": f"Bearer {tok}",
-            "ReleaseVersion": _get_ob_version(),
-            "X-GA": "v1 1",
-            "X-GA-SV": "1789535859",
-            "Accept-Encoding": "deflate, gzip",
-            "Content-Type": "application/octet-stream",
-            "User-Agent": "UnityPlayer/2018.4.12f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)",
-            "Connection": "keep-alive",
-        }
-        r = requests.post(
-            "https://clientbp.ppmainecoonghj.com/GetPlayerPersonalShow",
-            data=payload, headers=headers, verify=False, timeout=timeout,
-        )
-        if r.status_code != 200:
-            print(f"[INFO] {uid}: http {r.status_code}")
-            return {}
-        proto = apsPb.AccountPersonalShowInfo()
-        proto.ParseFromString(r.content)
-        data = json.loads(json_format.MessageToJson(proto))
-        try:
-            _info_data_cache[ck] = data
-        except Exception:
-            pass
-        return data
-    except Exception as e:
-        print(f"[INFO] {uid} err: {e}")
-        # clear token — may be expired
-        try:
-            _info_jwt_cache.clear()
-        except Exception:
-            pass
-        return {}
-
 
 # ============================================================
 #  CONFIG LOADER
@@ -348,7 +205,7 @@ def _reset_at_str():
 
 
 # ============================================================
-#  USAGE / QUOTA
+#  USAGE / QUOTA  (daily quota for user keys)
 # ============================================================
 def _load_usage():
     with usage_lock:
@@ -394,259 +251,77 @@ def check_and_consume_quota(api_key, uid, tier):
 
 
 # ============================================================
-#  DETAILED USAGE
+#  USAGE DETAIL DB  (for /master/api/usage-detail)
 # ============================================================
 def _load_usage_detail():
-    if not os.path.exists(USAGE_DETAIL_PATH):
-        return {}
-    try:
-        with open(USAGE_DETAIL_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    with USAGE_DB_LOCK:
+        if not os.path.exists(USAGE_DB_PATH):
+            return {}
+        try:
+            with open(USAGE_DB_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
 
 
-def _save_usage_detail(data):
-    try:
-        with open(USAGE_DETAIL_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-    except Exception:
-        pass
+def _save_usage_detail(db):
+    with USAGE_DB_LOCK:
+        try:
+            with open(USAGE_DB_PATH, "w", encoding="utf-8") as f:
+                json.dump(db, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[USAGE-DB] save error: {e}")
 
 
-def record_like_usage(api_key: str, uid: str, likes_given: int,
-                      server: str, nickname: str = ""):
-    if not api_key or api_key.startswith("_"):
-        return
+def log_usage_detail(api_key, uid, server_name, nickname, likes_given):
+    """Record one like-call for daily usage detail view."""
     today = _today_str()
-    data = _load_usage_detail()
-    key_entry = data.setdefault(api_key, {})
-    day_entry = key_entry.setdefault(today, {})
-    uid_entry = day_entry.setdefault(str(uid), {
+    db = _load_usage_detail()
+    day = db.setdefault(today, {})
+    entry_key = f"{api_key}|{uid}"
+    e = day.get(entry_key, {
+        "api_key": api_key,
+        "uid": str(uid),
+        "server": server_name,
+        "nickname": nickname or "",
         "requests": 0,
         "likes_given_total": 0,
-        "server": server,
-        "nickname": nickname,
-        "last_at": None,
+        "last_at": "",
     })
-    uid_entry["requests"] = int(uid_entry.get("requests", 0)) + 1
-    uid_entry["likes_given_total"] = int(uid_entry.get("likes_given_total", 0)) + int(likes_given)
-    uid_entry["server"] = server
-    if nickname:
-        uid_entry["nickname"] = nickname
-    uid_entry["last_at"] = _now_local().strftime("%Y-%m-%d %H:%M:%S")
-    _save_usage_detail(data)
+    e["requests"] += 1
+    e["likes_given_total"] += int(likes_given or 0)
+    e["nickname"] = nickname or e.get("nickname", "")
+    e["server"] = server_name or e.get("server", "")
+    e["last_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    day[entry_key] = e
+    _save_usage_detail(db)
 
 
 # ============================================================
-#  BLOCKED UIDs
+#  BLOCKED UID DB
 # ============================================================
 def _load_blocked():
-    if not os.path.exists(BLOCKED_UIDS_PATH):
-        return set()
-    try:
-        with open(BLOCKED_UIDS_PATH, "r", encoding="utf-8") as f:
-            return set(json.load(f).get("blocked", []))
-    except Exception:
-        return set()
+    with BLOCKED_DB_LOCK:
+        if not os.path.exists(BLOCKED_DB_PATH):
+            return set()
+        try:
+            with open(BLOCKED_DB_PATH, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
 
 
-def _save_blocked(uids: set):
-    try:
-        with open(BLOCKED_UIDS_PATH, "w", encoding="utf-8") as f:
-            json.dump({"blocked": list(uids)}, f, indent=2)
-    except Exception:
-        pass
+def _save_blocked(s):
+    with BLOCKED_DB_LOCK:
+        try:
+            with open(BLOCKED_DB_PATH, "w", encoding="utf-8") as f:
+                json.dump(sorted(list(s)), f)
+        except Exception:
+            pass
 
 
-def is_uid_blocked(uid: str) -> bool:
+def is_blocked_uid(uid):
     return str(uid) in _load_blocked()
-
-
-def block_uid(uid: str):
-    s = _load_blocked()
-    s.add(str(uid))
-    _save_blocked(s)
-
-
-def unblock_uid(uid: str):
-    s = _load_blocked()
-    s.discard(str(uid))
-    _save_blocked(s)
-
-
-# ============================================================
-#  🆕 INFO STORE + HISTORY (per-UID daily snapshot DB)
-# ============================================================
-def _load_info_store():
-    with INFO_STORE_LOCK:
-        if not os.path.exists(INFO_STORE_PATH):
-            return {}
-        try:
-            with open(INFO_STORE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-def _save_info_store(data):
-    with INFO_STORE_LOCK:
-        try:
-            with open(INFO_STORE_PATH, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-
-def _load_info_history():
-    with INFO_STORE_LOCK:
-        if not os.path.exists(INFO_HISTORY_PATH):
-            return {}
-        try:
-            with open(INFO_HISTORY_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-def _save_info_history(data):
-    with INFO_STORE_LOCK:
-        try:
-            with open(INFO_HISTORY_PATH, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-
-def _normalize_info(info: dict) -> dict:
-    """Extract only the essential fields into a normalized dict"""
-    basic   = info.get("basicInfo", {}) or {}
-    clan    = info.get("clanBasicInfo", {}) or {}
-    captain = info.get("captainBasicInfo", {}) or {}
-    social  = info.get("socialInfo", {}) or {}
-    credit  = info.get("creditScoreInfo", {}) or {}
-
-    head_pic = basic.get("headPic")
-    avatar_url = ICON_CDN_URL.format(head_pic=head_pic) if head_pic else None
-
-    return {
-        "uid": basic.get("accountId"),
-        "nickname": basic.get("nickname"),
-        "level": basic.get("level"),
-        "likes": basic.get("liked"),
-        "region": basic.get("region"),
-        "rank": basic.get("rank"),
-        "csRank": basic.get("csRank"),
-        "exp": basic.get("exp"),
-        "bannerId": basic.get("bannerId"),
-        "title": basic.get("title"),
-        "headPic": head_pic,
-        "avatarUrl": avatar_url,
-        "clanName": clan.get("clanName"),
-        "clanId": clan.get("clanId"),
-        "clanLevel": clan.get("clanLevel"),
-        "clanLeaderName": captain.get("nickname"),
-        "clanLeaderUid": captain.get("accountId", clan.get("captainId")),
-        "signature": social.get("signature"),
-        "creditScore": credit.get("creditScore"),
-        "lastLogin": basic.get("lastLoginDecoded"),
-        "created": basic.get("createdDecoded"),
-        "accountAge": basic.get("accountAge"),
-    }
-
-
-def fetch_live_info(uid: str, timeout: int = 20) -> dict:
-    """Direct fetch — no external API"""
-    return _fetch_info_direct(uid, timeout=timeout)
-
-
-def _append_history(uid: str, date: str, snapshot: dict, source: str,
-                    likes_given: int = 0):
-    """Store per-day snapshot into history DB"""
-    uid = str(uid)
-    hist = _load_info_history()
-    uid_hist = hist.setdefault(uid, {})
-    day_entry = uid_hist.setdefault(date, {
-        "date": date,
-        "sources": [],
-        "snapshots": [],
-    })
-
-    entry = {
-        "at": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": source,      # "auto_like" | "user_like" | "manual_refresh"
-        "likes_given": likes_given,
-        "snapshot": snapshot,
-    }
-    day_entry["snapshots"].append(entry)
-    if source not in day_entry["sources"]:
-        day_entry["sources"].append(source)
-    day_entry["last_at"] = entry["at"]
-
-    _save_info_history(hist)
-
-
-def get_or_refresh_info(uid: str, force: bool = False,
-                        source: str = "manual",
-                        likes_given: int = 0) -> dict:
-    """
-    Once per day fetches UID info and stores in DB.
-    Always appends to history if source != 'manual_readonly'.
-    """
-    uid = str(uid)
-    today = _today_str()
-    store = _load_info_store()
-    entry = store.get(uid, {})
-    last_date = entry.get("date")
-
-    # Daily cache: use stored if same day and normalized exists
-    if (not force) and last_date == today and entry.get("normalized"):
-        # still log a read event
-        if source != "manual_readonly":
-            _append_history(uid, today, entry.get("normalized", {}),
-                            source, likes_given)
-        return entry
-
-    live = fetch_live_info(uid)
-    if not live:
-        # fall back to old data
-        if entry:
-            if source != "manual_readonly":
-                _append_history(uid, today, entry.get("normalized", {}),
-                                f"{source}_stale", likes_given)
-            return entry
-        return {"uid": uid, "date": today, "normalized": {}, "raw": {}}
-
-    norm = _normalize_info(live)
-    new_entry = {
-        "uid": uid,
-        "date": today,
-        "fetched_at": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
-        "normalized": norm,
-        "raw": live,
-        "last_source": source,
-        "last_likes_given": likes_given,
-    }
-    store[uid] = new_entry
-    _save_info_store(store)
-
-    # append history
-    if source != "manual_readonly":
-        _append_history(uid, today, norm, source, likes_given)
-
-    return new_entry
-
-
-def diff_info(old_norm: dict, new_norm: dict) -> dict:
-    if not old_norm:
-        return {"changed": False, "fields": {}}
-    changed = {}
-    for k in set(old_norm.keys()) | set(new_norm.keys()):
-        if k == "raw" or k == "avatarUrl":
-            continue
-        if old_norm.get(k) != new_norm.get(k):
-            changed[k] = {"old": old_norm.get(k), "new": new_norm.get(k)}
-    return {"changed": bool(changed), "fields": changed}
 
 
 # ============================================================
@@ -782,6 +457,14 @@ def get_or_refresh_tokens(server_name, force=False):
         return tokens
 
 
+def get_global_jwt():
+    for srv in ("BD", "IND", "BR", "US", "SAC", "NA"):
+        toks = get_or_refresh_tokens(srv)
+        if toks:
+            return toks[0]
+    return None
+
+
 # ============================================================
 #  FREE FIRE HELPERS
 # ============================================================
@@ -901,21 +584,168 @@ def parse_account_info(pb):
 
 
 # ============================================================
+#  INFO DATABASE  (daily cached player info)
+# ============================================================
+def _load_info_db():
+    with INFO_DB_LOCK:
+        if not os.path.exists(INFO_DB_PATH):
+            return {"records": {}, "last_run": None}
+        try:
+            with open(INFO_DB_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"records": {}, "last_run": None}
+
+
+def _save_info_db(db):
+    with INFO_DB_LOCK:
+        try:
+            with open(INFO_DB_PATH, "w", encoding="utf-8") as f:
+                json.dump(db, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[INFO-DB] save error: {e}")
+
+
+def _fetch_info_api(jwt, uid):
+    """Call /info and /duo endpoints from mahir-info-api."""
+    result = {"info": None, "duo": None}
+    for ep in ("info", "duo"):
+        try:
+            url = f"{INFO_API_BASE}/{ep}?jwt={jwt}&uid={uid}"
+            r = requests.get(url, timeout=25, verify=False)
+            if r.status_code == 200:
+                try:
+                    result[ep] = r.json()
+                except Exception:
+                    result[ep] = {"raw": r.text}
+            else:
+                result[ep] = {"error": f"HTTP {r.status_code}"}
+        except Exception as e:
+            result[ep] = {"error": str(e)}
+        time.sleep(0.3)
+    return result
+
+
+def _extract_player_info(info_json, uid):
+    """
+    Normalize unknown response shape from /info.
+    Try to pull common fields regardless of nesting.
+    """
+    if not isinstance(info_json, dict):
+        return {}
+    # try common wrappers
+    for key in ("data", "account", "player", "result", "user"):
+        if isinstance(info_json.get(key), dict):
+            info_json = info_json[key]
+            break
+
+    def pick(*names, default=None):
+        for n in names:
+            if n in info_json and info_json[n] not in (None, ""):
+                return info_json[n]
+        return default
+
+    return {
+        "nickname": pick("nickname", "PlayerNickname", "name", "Name"),
+        "likes": pick("likes", "Likes", "likeCount", "totalLikes"),
+        "level": pick("level", "Level", "accountLevel"),
+        "region": pick("region", "Region", "server"),
+        "uid": pick("uid", "UID", "id") or str(uid),
+        "headPic": pick("headPic", "headpic", "avatar", "avatarId", "HeadPic"),
+        "exp": pick("exp", "Exp", "experience"),
+        "rank": pick("rank", "Rank", "brRank", "BRRank"),
+        "csRank": pick("csRank", "CSRank", "cs_rank"),
+        "clanName": pick("clanName", "ClanName", "guildName", "GuildName"),
+        "clanId": pick("clanId", "ClanId", "guildId", "GuildId"),
+        "clanLevel": pick("clanLevel", "ClanLevel", "guildLevel"),
+        "clanLeaderName": pick("clanLeaderName", "ClanLeaderName", "leaderName"),
+        "clanLeaderUid": pick("clanLeaderUid", "ClanLeaderUid", "leaderUid"),
+        "signature": pick("signature", "Signature", "bio"),
+        "creditScore": pick("creditScore", "CreditScore", "credit"),
+        "lastLogin": pick("lastLogin", "LastLogin"),
+        "created": pick("created", "Created", "createdAt"),
+        "accountAge": pick("accountAge", "AccountAge"),
+    }
+
+
+def fetch_and_store_info_for_uid(uid, server_name, jwt=None):
+    if not jwt:
+        jwt = get_global_jwt()
+    if not jwt:
+        print(f"[INFO] no JWT available for {uid}")
+        return None
+
+    raw = _fetch_info_api(jwt, uid)
+    player = _extract_player_info(raw.get("info") or {}, uid)
+
+    db = _load_info_db()
+    rec = {
+        "uid": str(uid),
+        "server_name": server_name.upper(),
+        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "player": player,
+        "info": raw.get("info"),
+        "duo": raw.get("duo"),
+    }
+    db["records"][str(uid)] = rec
+    db["last_run"] = rec["fetched_at"]
+    _save_info_db(db)
+    return rec
+
+
+def fetch_and_store_all_info(force=False):
+    targets = load_auto_targets()
+    db = _load_info_db()
+    today = _today_str()
+    jwt = get_global_jwt()
+
+    if not jwt:
+        print("[INFO] No JWT available — skipping info fetch")
+        return {"ok": False, "error": "no JWT available"}
+
+    fetched = 0
+    skipped = 0
+    errors = 0
+
+    for srv, uids in targets.items():
+        if not uids:
+            continue
+        for uid in uids:
+            existing = db["records"].get(str(uid))
+            if (not force) and existing and existing.get("fetched_at", "").startswith(today):
+                skipped += 1
+                continue
+            try:
+                rec = fetch_and_store_info_for_uid(uid, srv, jwt)
+                if rec:
+                    fetched += 1
+                    print(f"[INFO] {srv} {uid} → fetched")
+                else:
+                    errors += 1
+            except Exception as e:
+                errors += 1
+                print(f"[INFO] {srv} {uid} error: {e}")
+            time.sleep(0.5)
+
+    print(f"[INFO] done. fetched={fetched} skipped={skipped} errors={errors}")
+    return {"ok": True, "fetched": fetched, "skipped": skipped, "errors": errors}
+
+
+# ============================================================
 #  CORE LIKE
 # ============================================================
 _api_key_ctx = threading.local()
 
 
 def do_like(uid, server_name, tier="user"):
-    api_key = "_auto_" if tier == "auto" else getattr(_api_key_ctx, "key", "")
-
-    if is_uid_blocked(str(uid)):
+    # Blocked UID check
+    if is_blocked_uid(uid):
         return {
-            "error": "This UID is blocked by Master.",
-            "UID": uid,
-            "status": 0,
-            "Owner": OWNER_HANDLE,
+            "error": "This UID is blocked by master.",
+            "blocked": True,
         }
+
+    api_key = "_auto_" if tier == "auto" else getattr(_api_key_ctx, "key", "")
 
     allowed, remaining, reset_at = check_and_consume_quota(api_key, uid, tier)
     if not allowed:
@@ -937,16 +767,12 @@ def do_like(uid, server_name, tier="user"):
     if not tokens:
         return {"error": "Failed to generate JWT tokens."}
 
-    # 🆕 Step 1: daily snapshot BEFORE
-    snapshot_before = get_or_refresh_info(
-        uid, force=False,
-        source="user_like" if tier != "auto" else "auto_like",
-    )
-
     token = tokens[0]
     encrypted = enc(uid)
     before = parse_account_info(make_request(encrypted, server_name, token))
     if before is None:
+        # log even if unknown
+        log_usage_detail(api_key, uid, server_name, "Unknown", 0)
         return {
             "LikesGivenByAPI": 0, "LikesafterCommand": 0, "LikesbeforeCommand": 0,
             "PlayerNickname": "Unknown",
@@ -965,19 +791,7 @@ def do_like(uid, server_name, tier="user"):
     }
     like_given = max(0, int(after["likes"]) - int(before["likes"]))
 
-    if tier != "auto":
-        record_like_usage(api_key, str(after["uid"]), like_given,
-                          server_name, str(after["name"]))
-
-    # 🆕 Step 2: snapshot AFTER + history store
-    snapshot_after = get_or_refresh_info(
-        uid, force=True,
-        source="user_like" if tier != "auto" else "auto_like",
-        likes_given=like_given,
-    )
-    old_norm = (snapshot_before or {}).get("normalized", {}) or {}
-    new_norm = (snapshot_after or {}).get("normalized", {}) or {}
-    diff = diff_info(old_norm, new_norm)
+    log_usage_detail(api_key, uid, server_name, after["name"], like_given)
 
     return {
         "LikesGivenByAPI": like_given,
@@ -993,23 +807,16 @@ def do_like(uid, server_name, tier="user"):
         "quota_remaining": remaining,
         "Owner": OWNER_HANDLE,
         "status": 1 if like_given > 0 else 2,
-        "info_snapshot": new_norm,
-        "info_avatar": new_norm.get("avatarUrl"),
-        "info_changed": diff["changed"],
-        "info_diff": diff["fields"],
-        "info_stored_date": (snapshot_after or {}).get("date"),
-        "info_fetched_at": (snapshot_after or {}).get("fetched_at"),
     }
 
 
 # ============================================================
-#  AUTO-LIKE (with DB snapshot per UID)
+#  AUTO-LIKE
 # ============================================================
 def do_auto_like_now():
     print(f"\n[AUTO-LIKE] start {datetime.now():%Y-%m-%d %H:%M:%S}")
     targets = load_auto_targets()
     total = 0
-    results_summary = []
     for srv, uids in targets.items():
         if not uids:
             continue
@@ -1020,56 +827,27 @@ def do_auto_like_now():
                 continue
             url = like_url_for(srv)
             for uid in uids:
-                if is_uid_blocked(str(uid)):
-                    print(f"[AUTO-LIKE] {srv} {uid} SKIPPED (blocked)")
+                if is_blocked_uid(uid):
+                    print(f"[AUTO-LIKE] {srv} {uid} → SKIPPED (blocked)")
                     continue
                 try:
-                    # snapshot BEFORE
-                    snap_before = get_or_refresh_info(uid, force=False,
-                                                      source="auto_like")
-                    old_norm = (snap_before or {}).get("normalized", {}) or {}
-
                     ok = send_likes_from_all_tokens(uid, srv, url, tokens)
                     total += ok
-
-                    # snapshot AFTER → always write to DB
-                    snap_after = get_or_refresh_info(uid, force=True,
-                                                     source="auto_like",
-                                                     likes_given=ok)
-                    new_norm = (snap_after or {}).get("normalized", {}) or {}
-                    d = diff_info(old_norm, new_norm)
-
-                    results_summary.append({
-                        "server": srv,
-                        "uid": uid,
-                        "likes_sent": ok,
-                        "nickname": new_norm.get("nickname"),
-                        "likes_total": new_norm.get("likes"),
-                        "avatarUrl": new_norm.get("avatarUrl"),
-                        "info_changed": d["changed"],
-                        "info_diff": d["fields"],
-                        "at": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
-                    })
-                    print(f"[AUTO-LIKE] {srv} {uid} → {ok} | info_changed={d['changed']}")
+                    print(f"[AUTO-LIKE] {srv} {uid} → {ok}")
                 except Exception as e:
                     print(f"[AUTO-LIKE] {srv} {uid} err: {e}")
                 time.sleep(0.5)
         except Exception as e:
             print(f"[AUTO-LIKE] {srv} err: {e}")
-
-    # save summary for master panel
-    try:
-        summary_path = os.path.join(BASE_DIR, "mahir_auto_summary.json")
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "last_run": _now_local().strftime("%Y-%m-%d %H:%M:%S"),
-                "total_likes_sent": total,
-                "results": results_summary,
-            }, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[AUTO-LIKE] summary save err: {e}")
-
     print(f"[AUTO-LIKE] done. total={total}\n")
+
+    # Fetch & store player info (once per day)
+    try:
+        print("[AUTO-LIKE] fetching info for all targets...")
+        fetch_and_store_all_info()
+    except Exception as e:
+        print(f"[AUTO-LIKE] info fetch error: {e}")
+
     return total
 
 
@@ -1115,8 +893,8 @@ def start_background_jobs():
 # ============================================================
 #  MASTER HELPERS
 # ============================================================
-def _master_required(api_key_or_pass):
-    return (api_key_or_pass or "").strip() == MASTER_PASSWORD
+def _master_required(api_key):
+    return classify_key(api_key) == "master"
 
 
 def _safe_file_path(name):
@@ -1176,15 +954,12 @@ def route_health():
         "tg": TELEGRAM,
         "tiktok": TIKTOK,
         "jwt_api": JWT_API_BASE,
-        "info_mode": "direct (xInFo logic)" if _INFO_DIRECT_AVAILABLE else "unavailable",
-        "icon_cdn": ICON_CDN_BASE,
+        "info_api": INFO_API_BASE,
         "servers": list(SERVER_ACCOUNT_FILES.keys()),
         "auto_like_at": f"{AUTO_LIKE_HOUR:02d}:{AUTO_LIKE_MINUTE:02d}",
         "jwt_refresh_hours": JWT_REFRESH_HOURS,
         "daily_limit_user": DAILY_LIMIT_USER,
         "auto_targets_loaded": {k: len(v) for k, v in load_auto_targets().items()},
-        "blocked_count": len(_load_blocked()),
-        "info_store_count": len(_load_info_store()),
         "endpoints": {
             "short": "/mahir&like?uid={uid}&key={key}",
             "short_server": "/mahir&like?uid={uid}&key={key}&server_name={server}",
@@ -1210,11 +985,16 @@ def handle_like():
             return jsonify({"error": f"Unsupported server '{server_name}'"}), 400
 
         _api_key_ctx.key = api_key
+        try:
+            register_auto_uid(server_name, uid)
+        except Exception as e:
+            print(f"[auto-register] warn: {e}")
+
         result = do_like(uid, server_name, tier=tier)
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
-            if "blocked" in result["error"].lower():
+            if result.get("blocked"):
                 return jsonify(result), 403
             return jsonify(result), 500
         return jsonify(result)
@@ -1254,11 +1034,16 @@ def mahir_like():
             }), 400
 
         _api_key_ctx.key = api_key
+        try:
+            register_auto_uid(server_name, uid)
+        except Exception as e:
+            print(f"[auto-register] warn: {e}")
+
         result = do_like(uid, server_name, tier=tier)
         if result.get("error"):
             if "Daily limit" in result["error"]:
                 return jsonify(result), 429
-            if "blocked" in result["error"].lower():
+            if result.get("blocked"):
                 return jsonify(result), 403
             return jsonify(result), 500
         return jsonify(result)
@@ -1288,7 +1073,7 @@ def cron_auto_like():
 def master_files():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     files = []
     for name in EDITABLE_FILES:
@@ -1303,20 +1088,6 @@ def master_files():
             except Exception:
                 pass
         files.append({"name": name, "exists": exists, "size": size, "lines": lines})
-
-    # info store files
-    files.append({
-        "name": "mahir_info_store.json",
-        "exists": os.path.exists(INFO_STORE_PATH),
-        "size": os.path.getsize(INFO_STORE_PATH) if os.path.exists(INFO_STORE_PATH) else 0,
-        "lines": len(_load_info_store()),
-    })
-    files.append({
-        "name": "mahir_info_history.json",
-        "exists": os.path.exists(INFO_HISTORY_PATH),
-        "size": os.path.getsize(INFO_HISTORY_PATH) if os.path.exists(INFO_HISTORY_PATH) else 0,
-        "lines": len(_load_info_history()),
-    })
     return _jsonify({"files": files})
 
 
@@ -1324,7 +1095,7 @@ def master_files():
 def master_get_file():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     name = request.args.get("name", "").strip()
     if name not in EDITABLE_FILES:
@@ -1339,7 +1110,7 @@ def master_save_file():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     name = (data.get("name") or "").strip()
     content = data.get("content", "")
@@ -1365,7 +1136,7 @@ def master_save_file():
 def master_upload():
     key = (request.form.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     f = request.files.get("file")
     if not f:
@@ -1397,6 +1168,9 @@ def master_upload():
     return _jsonify({"ok": True, "name": target_name, "size": len(content)})
 
 
+# ============================================================
+#  AUTO UID BULK UPLOAD
+# ============================================================
 @app.post("/master/api/auto/bulk-upload")
 def master_auto_bulk_upload():
     key = (request.form.get("key")
@@ -1404,7 +1178,7 @@ def master_auto_bulk_upload():
            or request.args.get("key")
            or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     srv = (request.form.get("server_name")
            or (request.get_json(silent=True) or {}).get("server_name")
@@ -1474,12 +1248,15 @@ def master_auto_bulk_upload():
     })
 
 
+# ============================================================
+#  AUTO UID — add / remove / clear
+# ============================================================
 @app.post("/master/api/auto/add")
 def master_auto_add():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     uid = str(data.get("uid", "")).strip()
     srv = str(data.get("server_name", "")).upper().strip()
@@ -1487,6 +1264,15 @@ def master_auto_add():
         return jsonify({"error": "uid (digits) and valid server_name required"}), 400
 
     register_auto_uid(srv, uid)
+
+    # Immediately fetch info for this new UID (async-ish)
+    def _bg():
+        try:
+            fetch_and_store_info_for_uid(uid, srv)
+        except Exception as e:
+            print(f"[auto/add] info fetch warn: {e}")
+    threading.Thread(target=_bg, daemon=True).start()
+
     return _jsonify({"ok": True, "auto_targets": load_auto_targets()})
 
 
@@ -1495,7 +1281,7 @@ def master_auto_remove():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     uid = str(data.get("uid", "")).strip()
     srv = str(data.get("server_name", "")).upper().strip()
@@ -1507,6 +1293,12 @@ def master_auto_remove():
         targets[srv].remove(uid)
         save_auto_targets(targets)
 
+    # Also remove from info DB
+    db = _load_info_db()
+    if uid in db.get("records", {}):
+        del db["records"][uid]
+        _save_info_db(db)
+
     return _jsonify({"ok": True, "auto_targets": targets})
 
 
@@ -1515,9 +1307,10 @@ def master_auto_clear():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     srv = str(data.get("server_name", "")).upper().strip()
+
     targets = load_auto_targets()
 
     if not srv or srv == "ALL":
@@ -1532,11 +1325,184 @@ def master_auto_clear():
     return _jsonify({"ok": True, "cleared": srv or "ALL", "auto_targets": targets})
 
 
+# ============================================================
+#  AUTO-WITH-INFO  (targets + cached info + last run)
+# ============================================================
+@app.get("/master/api/auto-with-info")
+def master_auto_with_info():
+    """
+    Returns:
+      {
+        auto_with_info: { "BD": [ {uid, nickname, level, likes, avatarUrl, ...} ] },
+        last_run_summary: { last_run: "YYYY-MM-DD HH:MM:SS" }
+      }
+    """
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    targets = load_auto_targets()
+    db = _load_info_db()
+    records = db.get("records", {})
+    blocked = _load_blocked()
+
+    out = {}
+    for srv, uids in targets.items():
+        rows = []
+        for uid in uids:
+            rec = records.get(str(uid)) or {}
+            player = rec.get("player") or {}
+            rows.append({
+                "uid": str(uid),
+                "nickname": player.get("nickname"),
+                "level": player.get("level"),
+                "likes": player.get("likes"),
+                "region": player.get("region") or srv,
+                "headPic": player.get("headPic"),
+                "clanName": player.get("clanName"),
+                "clanId": player.get("clanId"),
+                "avatarUrl": None,
+                "info_date": (rec.get("fetched_at") or "")[:10],
+                "is_blocked": str(uid) in blocked,
+                "last_likes_given": None,  # can be enhanced later
+            })
+        out[srv] = rows
+
+    return _jsonify({
+        "auto_with_info": out,
+        "last_run_summary": {"last_run": db.get("last_run")},
+    })
+
+
+# ============================================================
+#  PLAYER INFO  (single UID — from cache; no fresh fetch)
+# ============================================================
+@app.get("/master/api/player-info")
+def master_player_info():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    uid = request.args.get("uid", "").strip()
+    if not uid:
+        return jsonify({"error": "uid required"}), 400
+
+    db = _load_info_db()
+    rec = db.get("records", {}).get(str(uid), {})
+    player = rec.get("player") or {}
+
+    # Today's like activity from usage detail
+    today = _today_str()
+    usage_db = _load_usage_detail()
+    day = usage_db.get(today, {})
+    activity = []
+    for k, v in day.items():
+        if v.get("uid") == str(uid):
+            activity.append({
+                "api_key": v.get("api_key"),
+                "requests": v.get("requests"),
+                "likes_given_total": v.get("likes_given_total"),
+                "last_at": v.get("last_at"),
+            })
+
+    return _jsonify({
+        "uid": str(uid),
+        "nickname": player.get("nickname"),
+        "level": player.get("level"),
+        "likes": player.get("likes"),
+        "region": player.get("region"),
+        "headPic": player.get("headPic"),
+        "avatarUrl": None,
+        "rank": player.get("rank"),
+        "csRank": player.get("csRank"),
+        "clanName": player.get("clanName"),
+        "clanId": player.get("clanId"),
+        "clanLevel": player.get("clanLevel"),
+        "clanLeaderName": player.get("clanLeaderName"),
+        "clanLeaderUid": player.get("clanLeaderUid"),
+        "signature": player.get("signature"),
+        "creditScore": player.get("creditScore"),
+        "lastLogin": player.get("lastLogin"),
+        "created": player.get("created"),
+        "accountAge": player.get("accountAge"),
+        "is_blocked": is_blocked_uid(uid),
+        "today_like_activity": activity,
+        "history_days": [],
+        "history": {},
+        "fetched_at": rec.get("fetched_at"),
+        "raw_info": rec.get("info"),
+        "raw_duo": rec.get("duo"),
+    })
+
+
+# ============================================================
+#  USAGE DETAIL  (per-day table)
+# ============================================================
+@app.get("/master/api/usage-detail")
+def master_usage_detail():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+
+    date = request.args.get("date", "").strip() or _today_str()
+    db = _load_usage_detail()
+    day = db.get(date, {})
+    rows = list(day.values())
+    rows.sort(key=lambda r: r.get("last_at", ""), reverse=True)
+    return _jsonify({"date": date, "rows": rows})
+
+
+# ============================================================
+#  BLOCKED  (list / add / remove)
+# ============================================================
+@app.get("/master/api/blocked")
+def master_blocked_list():
+    key = request.args.get("key", "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+    return _jsonify({"blocked": sorted(list(_load_blocked()))})
+
+
+@app.post("/master/api/block")
+def master_block_add():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+    uid = str(data.get("uid", "")).strip()
+    if not uid.isdigit():
+        return jsonify({"error": "uid required"}), 400
+
+    s = _load_blocked()
+    s.add(uid)
+    _save_blocked(s)
+    return _jsonify({"ok": True, "blocked": sorted(list(s))})
+
+
+@app.post("/master/api/unblock")
+def master_block_remove():
+    data = request.get_json(silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not _master_required(key):
+        return jsonify({"error": "master key required"}), 403
+    uid = str(data.get("uid", "")).strip()
+    if not uid:
+        return jsonify({"error": "uid required"}), 400
+
+    s = _load_blocked()
+    s.discard(uid)
+    _save_blocked(s)
+    return _jsonify({"ok": True, "blocked": sorted(list(s))})
+
+
+# ============================================================
+#  KEYS
+# ============================================================
 @app.get("/master/api/keys")
 def master_get_keys():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     cfg = _read_config()
     return _jsonify({
@@ -1551,7 +1517,7 @@ def master_save_keys():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     allowed = data.get("allowed_keys", {})
     admin = data.get("admin_keys", [])
@@ -1569,11 +1535,14 @@ def master_save_keys():
     return _jsonify({"ok": True})
 
 
+# ============================================================
+#  STATS
+# ============================================================
 @app.get("/master/api/stats")
 def master_stats():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     auto_targets = load_auto_targets()
     usage = _load_usage()
@@ -1605,6 +1574,12 @@ def master_stats():
         else:
             jwt_status[srv] = {"tokens": 0, "age_seconds": None}
 
+    info_db = _load_info_db()
+    info_stats = {
+        "total_records": len(info_db.get("records", {})),
+        "last_run": info_db.get("last_run"),
+    }
+
     return _jsonify({
         "today": today,
         "auto_targets": {k: len(v) for k, v in auto_targets.items()},
@@ -1617,19 +1592,20 @@ def master_stats():
             "user": len(get_allowed_keys()),
             "master": len(get_admin_keys()),
         },
-        "blocked_uids": sorted(_load_blocked()),
+        "info_db": info_stats,
         "blocked_count": len(_load_blocked()),
-        "info_store_count": len(_load_info_store()),
-        "info_history_count": len(_load_info_history()),
     })
 
 
+# ============================================================
+#  ACTIONS
+# ============================================================
 @app.post("/master/api/run-auto")
 def master_run_auto():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
     threading.Thread(target=do_auto_like_now, daemon=True).start()
     return _jsonify({"ok": True, "message": "auto-like triggered"})
 
@@ -1639,7 +1615,7 @@ def master_jwt_refresh():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
     results = {}
     for srv in SERVER_ACCOUNT_FILES:
@@ -1651,265 +1627,72 @@ def master_jwt_refresh():
     return _jsonify({"ok": True, "refreshed": results})
 
 
-@app.get("/master/api/usage-detail")
-def master_usage_detail():
+# ============================================================
+#  INFO DB APIs
+# ============================================================
+@app.get("/master/api/info-db")
+def master_info_db():
     key = request.args.get("key", "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
-    date = request.args.get("date", _today_str()).strip()
-    data = _load_usage_detail()
+    srv = request.args.get("server_name", "").upper().strip()
+    db = _load_info_db()
+    records = db.get("records", {})
 
-    rows = []
-    for api_key, days in data.items():
-        day = days.get(date, {})
-        for uid, info in day.items():
-            rows.append({
-                "api_key": api_key,
-                "uid": uid,
-                "nickname": info.get("nickname", ""),
-                "server": info.get("server", ""),
-                "requests": info.get("requests", 0),
-                "likes_given_total": info.get("likes_given_total", 0),
-                "last_at": info.get("last_at"),
-            })
-    rows.sort(key=lambda x: x["likes_given_total"], reverse=True)
-    return _jsonify({"date": date, "rows": rows, "total_rows": len(rows)})
+    if srv:
+        records = {k: v for k, v in records.items()
+                   if v.get("server_name") == srv}
+
+    return _jsonify({
+        "ok": True,
+        "last_run": db.get("last_run"),
+        "count": len(records),
+        "records": records,
+    })
 
 
-@app.get("/master/api/blocked")
-def master_blocked_list():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    return _jsonify({"blocked": sorted(_load_blocked())})
-
-
-@app.post("/master/api/block")
-def master_block_uid():
+@app.post("/master/api/info-db/clear")
+def master_info_db_clear():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    uid = str(data.get("uid", "")).strip()
-    if not uid.isdigit():
-        return jsonify({"error": "valid uid required"}), 400
-    block_uid(uid)
-    return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
+        return jsonify({"error": "master key required"}), 403
+
+    srv = str(data.get("server_name", "")).upper().strip()
+    db = _load_info_db()
+
+    if not srv or srv == "ALL":
+        db = {"records": {}, "last_run": None}
+    else:
+        if srv not in SERVER_ACCOUNT_FILES:
+            return jsonify({"error": f"invalid server_name '{srv}'"}), 400
+        db["records"] = {k: v for k, v in db.get("records", {}).items()
+                         if v.get("server_name") != srv}
+
+    _save_info_db(db)
+    return _jsonify({"ok": True, "cleared": srv or "ALL",
+                     "remaining": len(db.get("records", {}))})
 
 
-@app.post("/master/api/unblock")
-def master_unblock_uid():
-    data = request.get_json(silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-    uid = str(data.get("uid", "")).strip()
-    if not uid:
-        return jsonify({"error": "uid required"}), 400
-    unblock_uid(uid)
-    return _jsonify({"ok": True, "blocked": sorted(_load_blocked())})
-
-
-# ---------- Player full info (direct + stored snapshot + history) ----------
-@app.get("/master/api/player-info")
-def master_player_info():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    uid = request.args.get("uid", "").strip()
-    if not uid.isdigit():
-        return jsonify({"error": "valid uid required"}), 400
-
-    # stored snapshot
-    stored_entry = get_or_refresh_info(uid, force=False,
-                                       source="manual_readonly")
-    stored_norm = stored_entry.get("normalized", {}) or {}
-
-    # live direct fetch
-    live_info = fetch_live_info(uid)
-    if not live_info:
-        return jsonify({"error": "info fetch failed"}), 502
-
-    live_norm = _normalize_info(live_info)
-    diff = diff_info(stored_norm, live_norm)
-
-    # history
-    hist_all = _load_info_history()
-    uid_history = hist_all.get(str(uid), {})
-
-    today = _today_str()
-    usage = _load_usage_detail()
-    today_likes = []
-    for api_key, days in usage.items():
-        day = days.get(today, {})
-        if str(uid) in day:
-            today_likes.append({"api_key": api_key, **day[str(uid)]})
-
-    card = {
-        "uid": live_norm.get("uid") or uid,
-        "nickname": live_norm.get("nickname"),
-        "level": live_norm.get("level"),
-        "likes": live_norm.get("likes"),
-        "region": live_norm.get("region"),
-        "rank": live_norm.get("rank"),
-        "csRank": live_norm.get("csRank"),
-        "clanName": live_norm.get("clanName"),
-        "clanId": live_norm.get("clanId"),
-        "clanLevel": live_norm.get("clanLevel"),
-        "clanLeaderName": live_norm.get("clanLeaderName"),
-        "clanLeaderUid": live_norm.get("clanLeaderUid"),
-        "headPic": live_norm.get("headPic"),
-        "avatarUrl": live_norm.get("avatarUrl"),
-        "bannerId": live_norm.get("bannerId"),
-        "title": live_norm.get("title"),
-        "lastLogin": live_norm.get("lastLogin"),
-        "created": live_norm.get("created"),
-        "accountAge": live_norm.get("accountAge"),
-        "signature": live_norm.get("signature"),
-        "creditScore": live_norm.get("creditScore"),
-        "today_like_activity": today_likes,
-        "is_blocked": is_uid_blocked(str(uid)),
-        # stored snapshot + diff
-        "stored_snapshot": stored_norm,
-        "stored_date": stored_entry.get("date"),
-        "stored_fetched_at": stored_entry.get("fetched_at"),
-        "stored_last_source": stored_entry.get("last_source"),
-        "stored_last_likes_given": stored_entry.get("last_likes_given"),
-        "live_snapshot": live_norm,
-        "info_changed": diff["changed"],
-        "info_diff": diff["fields"],
-        # history
-        "history": uid_history,
-        "history_days": list(uid_history.keys()),
-        "full": live_info,
-    }
-    return _jsonify(card)
-
-
-# ---------- Info store endpoints ----------
-@app.get("/master/api/info-store")
-def master_info_store():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    uid = request.args.get("uid", "").strip()
-    store = _load_info_store()
-    if uid:
-        return _jsonify({"uid": uid, "entry": store.get(uid, {})})
-
-    summary = []
-    for u, e in store.items():
-        norm = e.get("normalized", {})
-        summary.append({
-            "uid": u,
-            "date": e.get("date"),
-            "fetched_at": e.get("fetched_at"),
-            "last_source": e.get("last_source"),
-            "last_likes_given": e.get("last_likes_given"),
-            "nickname": norm.get("nickname"),
-            "likes": norm.get("likes"),
-            "avatarUrl": norm.get("avatarUrl"),
-        })
-    return _jsonify({"count": len(summary), "entries": summary})
-
-
-@app.get("/master/api/info-store/history")
-def master_info_history():
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    uid = request.args.get("uid", "").strip()
-    hist = _load_info_history()
-
-    if uid:
-        return _jsonify({"uid": uid, "history": hist.get(uid, {})})
-
-    # summary all
-    summary = []
-    for u, days in hist.items():
-        total_days = len(days)
-        total_snaps = sum(len(d.get("snapshots", [])) for d in days.values())
-        last_date = max(days.keys()) if days else None
-        summary.append({
-            "uid": u,
-            "days": total_days,
-            "snapshots": total_snaps,
-            "last_date": last_date,
-        })
-    return _jsonify({"count": len(summary), "entries": summary})
-
-
-@app.post("/master/api/info-store/refresh")
-def master_info_store_refresh():
+@app.post("/master/api/info-db/fetch")
+def master_info_db_fetch():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or request.args.get("key") or "").strip()
     if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
+        return jsonify({"error": "master key required"}), 403
 
-    uid = str(data.get("uid") or request.args.get("uid") or "").strip()
-    if not uid.isdigit():
-        return jsonify({"error": "valid uid required"}), 400
+    force = str(data.get("force", "")).lower() in ("1", "true", "yes")
 
-    entry = get_or_refresh_info(uid, force=True, source="manual_refresh")
-    return _jsonify({"ok": True, "entry": entry})
+    def _run():
+        try:
+            fetch_and_store_all_info(force=force)
+        except Exception as e:
+            print(f"[info-db/fetch] error: {e}")
 
-
-# ---------- 🆕 Auto-like + Info combined view ----------
-@app.get("/master/api/auto-with-info")
-def master_auto_with_info():
-    """
-    Returns auto.txt targets with their latest DB snapshot & last auto-run summary.
-    Perfect for showing in master panel: 'auto list + info + last likes'.
-    """
-    key = request.args.get("key", "").strip()
-    if not _master_required(key):
-        return jsonify({"error": "master password required (OWNER-MAHIR)"}), 403
-
-    targets = load_auto_targets()
-    store = _load_info_store()
-
-    out = {}
-    for srv, uids in targets.items():
-        rows = []
-        for uid in uids:
-            e = store.get(str(uid), {})
-            norm = e.get("normalized", {}) or {}
-            rows.append({
-                "uid": uid,
-                "nickname": norm.get("nickname"),
-                "likes": norm.get("likes"),
-                "level": norm.get("level"),
-                "region": norm.get("region"),
-                "avatarUrl": norm.get("avatarUrl"),
-                "headPic": norm.get("headPic"),
-                "clanName": norm.get("clanName"),
-                "is_blocked": is_uid_blocked(str(uid)),
-                "info_date": e.get("date"),
-                "info_fetched_at": e.get("fetched_at"),
-                "last_source": e.get("last_source"),
-                "last_likes_given": e.get("last_likes_given"),
-            })
-        out[srv] = rows
-
-    # last summary
-    summary = {}
-    try:
-        summary_path = os.path.join(BASE_DIR, "mahir_auto_summary.json")
-        if os.path.exists(summary_path):
-            with open(summary_path, "r", encoding="utf-8") as f:
-                summary = json.load(f)
-    except Exception:
-        summary = {}
-
-    return _jsonify({
-        "auto_with_info": out,
-        "total_uids": sum(len(v) for v in out.values()),
-        "last_run_summary": summary,
-    })
+    threading.Thread(target=_run, daemon=True).start()
+    return _jsonify({"ok": True, "message": "info fetch triggered",
+                     "force": force})
 
 
 # ============================================================
