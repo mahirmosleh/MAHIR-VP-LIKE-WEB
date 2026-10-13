@@ -1,0 +1,11 @@
+flask
+flask-cors
+gunicorn
+pycryptodome
+requests
+aiohttp
+urllib3
+protobuf
+orjson
+cryptography
+cachetools

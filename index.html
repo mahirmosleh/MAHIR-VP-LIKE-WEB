@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title>{{ brand }} — MAHIR VIP LIKE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  :root{
+    --bg:#08080c;--surface:#0f0f16;--surface-2:#15151f;--surface-3:#1c1c28;
+    --border:#25253a;--border-hi:#35354a;
+    --text:#f0f0f8;--text-dim:#8b8ba7;--text-mute:#5a5a70;
+    --purple:#8b5cf6;--purple-hi:#a78bfa;--purple-soft:rgba(139,92,246,.15);
+    --pink:#ec4899;--green:#22c55e;--gold:#fbbf24;--red:#ef4444;--cyan:#06b6d4;
+  }
+  html,body{background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  body{padding-bottom:80px}
+
+  .glow{position:fixed;pointer-events:none;z-index:0}
+  .glow-1{top:-150px;left:50%;transform:translateX(-50%);width:500px;height:500px;
+    background:radial-gradient(circle,rgba(139,92,246,.20) 0%,transparent 65%);filter:blur(70px)}
+  .glow-2{bottom:-150px;right:-100px;width:400px;height:400px;
+    background:radial-gradient(circle,rgba(236,72,153,.12) 0%,transparent 65%);filter:blur(70px)}
+
+  .wrap{position:relative;z-index:1;max-width:520px;margin:0 auto;padding:16px}
+
+  /* top bar */
+  .top-bar{display:flex;align-items:center;justify-content:space-between;padding:12px 4px 18px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand-logo{width:36px;height:36px;border-radius:10px;
+    background:linear-gradient(135deg,#8b5cf6,#06b6d4);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:900;font-size:15px;color:#fff;
+    box-shadow:0 0 20px rgba(139,92,246,.5)}
+  .brand-name{font-weight:800;font-size:15px;letter-spacing:-.02em}
+  .brand-name span{color:var(--text-mute);font-weight:500}
+  .master-btn{padding:7px 14px;border-radius:10px;font-size:12px;font-weight:700;
+    background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.3);
+    color:var(--purple-hi);text-decoration:none;display:flex;align-items:center;gap:5px}
+
+  /* tabs */
+  .tabs{display:flex;gap:4px;padding:4px;background:var(--surface);
+    border:1px solid var(--border);border-radius:14px;margin-bottom:18px}
+  .tab{flex:1;padding:10px 8px;border-radius:10px;text-align:center;
+    font-size:12.5px;font-weight:700;color:var(--text-mute);cursor:pointer;
+    transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;
+    border:1px solid transparent;background:transparent}
+  .tab.active{background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;
+    box-shadow:0 4px 14px rgba(139,92,246,.4)}
+  .tab .ico{font-size:14px}
+
+  .hero{text-align:center;padding:8px 0 20px}
+  .hero h1{font-size:28px;font-weight:900;letter-spacing:-.03em;line-height:1.1;
+    background:linear-gradient(135deg,#fff 0%,#a78bfa 60%,#06b6d4 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:6px}
+  .hero p{font-size:13px;color:var(--text-dim)}
+
+  .card{background:linear-gradient(180deg,var(--surface),#0a0a10);
+    border:1px solid var(--border);border-radius:18px;padding:18px;margin-bottom:14px;
+    box-shadow:0 8px 28px rgba(0,0,0,.4)}
+  .card-title{font-size:13px;font-weight:700;letter-spacing:.01em;
+    margin-bottom:14px;display:flex;align-items:center;gap:8px;color:var(--text)}
+  .card-title .ico{width:26px;height:26px;border-radius:8px;
+    background:var(--purple-soft);border:1px solid rgba(139,92,246,.25);
+    display:flex;align-items:center;justify-content:center;font-size:13px}
+
+  .field{margin-bottom:12px}
+  .field-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .field label{font-size:11.5px;font-weight:600;color:var(--text-dim);
+    display:flex;align-items:center;gap:5px}
+  .field .hint{font-size:10.5px;color:var(--text-mute);font-family:'JetBrains Mono',monospace}
+  .input{width:100%;padding:13px 14px;background:#0a0a10;
+    border:1px solid var(--border);border-radius:12px;color:var(--text);
+    font-size:14px;font-weight:500;font-family:inherit;outline:none;transition:all .15s}
+  .input::placeholder{color:var(--text-mute)}
+  .input:focus{border-color:var(--purple);box-shadow:0 0 0 4px rgba(139,92,246,.12);
+    background:#0d0d14}
+  select.input{cursor:pointer;appearance:none;
+    background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8ba7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
+  option{background:#15151f;color:#f0f0f8}
+
+  .btn{width:100%;padding:14px;border-radius:12px;border:none;font-family:inherit;
+    font-size:14px;font-weight:700;cursor:pointer;transition:all .15s;
+    display:flex;align-items:center;justify-content:center;gap:8px}
+  .btn-primary{background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;
+    box-shadow:0 6px 20px rgba(139,92,246,.35)}
+  .btn-primary:active{transform:scale(.98)}
+  .btn-primary:disabled{opacity:.6}
+
+  .result{margin-top:14px;border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,#0f1419,#0a0d10);
+    border:1px solid rgba(34,197,94,.25);display:none}
+  .result.show{display:block;animation:fadeIn .4s}
+  .result.err{border-color:rgba(239,68,68,.35)}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .result-head{display:flex;align-items:center;gap:10px;padding:14px 16px;
+    border-bottom:1px solid rgba(34,197,94,.15);
+    background:linear-gradient(90deg,rgba(34,197,94,.08),transparent)}
+  .result.err .result-head{border-bottom-color:rgba(239,68,68,.15);
+    background:linear-gradient(90deg,rgba(239,68,68,.08),transparent)}
+  .result-head .check{width:32px;height:32px;border-radius:10px;
+    background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);
+    display:flex;align-items:center;justify-content:center;font-size:16px;color:#22c55e}
+  .result.err .result-head .check{background:rgba(239,68,68,.15);
+    border-color:rgba(239,68,68,.4);color:#ef4444}
+  .result-title{font-size:14px;font-weight:800;color:var(--text)}
+  .result-sub{font-size:11.5px;color:var(--text-dim);margin-top:2px}
+
+  /* player mini card inside result */
+  .pcard{margin:14px;padding:14px;border-radius:14px;
+    background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+    border:1px solid rgba(139,92,246,.3);position:relative;overflow:hidden}
+  .pcard::before{content:'';position:absolute;top:0;right:0;width:60%;height:100%;
+    background:radial-gradient(circle at 80% 40%,rgba(139,92,246,.35),transparent 70%);
+    pointer-events:none}
+  .pcard-row{display:flex;align-items:center;gap:12px;position:relative;z-index:1}
+  .pcard-avatar{width:64px;height:64px;border-radius:14px;
+    border:3px solid rgba(255,255,255,.15);object-fit:cover;background:#0a0a10;
+    flex-shrink:0;box-shadow:0 6px 16px rgba(0,0,0,.5);display:block}
+  .pcard-avatar-fb{width:64px;height:64px;border-radius:14px;
+    border:3px solid rgba(255,255,255,.15);flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    font-size:26px;font-weight:900;color:#fff;
+    background:linear-gradient(135deg,#8b5cf6,#ec4899)}
+  .pcard-info{flex:1;min-width:0}
+  .pcard-name{font-size:16px;font-weight:800;letter-spacing:-.01em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .pcard-uid{font-size:12px;color:rgba(255,255,255,.7);
+    font-family:'JetBrains Mono',monospace;margin-top:3px;
+    display:flex;align-items:center;gap:6px}
+  .copy-mini{padding:2px 6px;border-radius:6px;background:rgba(255,255,255,.1);
+    border:1px solid rgba(255,255,255,.15);color:#fff;font-size:10px;
+    cursor:pointer;font-weight:600}
+  .pcard-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .pchip{padding:4px 9px;border-radius:999px;font-size:10.5px;font-weight:700;
+    font-family:'JetBrains Mono',monospace;background:rgba(255,255,255,.1);
+    border:1px solid rgba(255,255,255,.15);color:#fff;display:inline-flex;
+    align-items:center;gap:4px}
+  .pchip.lvl{background:rgba(139,92,246,.25);border-color:rgba(167,139,250,.5);color:#c4b5fd}
+  .pchip.likes{background:rgba(236,72,153,.2);border-color:rgba(236,72,153,.4);color:#f9a8d4}
+  .pchip.clan{background:rgba(251,191,36,.15);border-color:rgba(251,191,36,.4);color:#fcd34d}
+
+  .stat-list{padding:0 16px 16px}
+  .stat-row{display:flex;align-items:center;justify-content:space-between;
+    padding:11px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px}
+  .stat-row:last-child{border-bottom:none}
+  .stat-row .lbl{color:var(--text-dim);display:flex;align-items:center;gap:8px}
+  .stat-row .lbl::before{content:'';width:5px;height:5px;border-radius:50%;
+    background:var(--purple);box-shadow:0 0 8px var(--purple)}
+  .stat-row .val{font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)}
+  .stat-row .val.green{color:#4ade80}
+  .stat-row .val.purple{color:var(--purple-hi)}
+  .stat-row .val.gold{color:var(--gold)}
+  .stat-row .val.pink{color:#f472b6}
+
+  .bottom-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;
+    padding:14px 16px;border-top:1px solid rgba(255,255,255,.05);
+    background:rgba(255,255,255,.02)}
+  .bstat .lbl{font-size:10px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--text-mute);margin-bottom:4px}
+  .bstat .val{font-size:18px;font-weight:900;font-family:'JetBrains Mono',monospace;
+    letter-spacing:-.02em;line-height:1.2}
+  .bstat .val.purple{background:linear-gradient(135deg,#a78bfa,#7c3aed);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .bstat .val.gold{color:var(--gold)}
+
+  .hist-section{margin-top:18px;padding:18px;
+    background:linear-gradient(180deg,var(--surface),#0a0a10);
+    border:1px solid var(--border);border-radius:18px}
+  .hist-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .hist-head h2{font-size:14px;font-weight:800;display:flex;align-items:center;gap:8px;margin:0}
+  .refresh-btn{padding:6px 12px;border-radius:8px;background:var(--surface-2);
+    border:1px solid var(--border);color:var(--text-dim);font-size:11.5px;
+    font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px}
+  .hist-filters{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px}
+  .hist-row{display:flex;align-items:center;gap:12px;padding:11px 12px;
+    background:#0a0a10;border:1px solid var(--border);border-radius:12px;
+    cursor:pointer;transition:all .15s;margin-bottom:6px}
+  .hist-row:active{border-color:var(--purple);background:var(--surface-2)}
+  .hist-avatar{width:44px;height:44px;border-radius:10px;object-fit:cover;
+    background:#15151f;flex-shrink:0;border:2px solid rgba(139,92,246,.3);display:block}
+  .hist-avatar-fb{width:44px;height:44px;border-radius:10px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:16px;font-weight:900;color:#fff;flex-shrink:0;
+    background:linear-gradient(135deg,#8b5cf6,#ec4899);
+    border:2px solid rgba(139,92,246,.3)}
+  .hist-meta{flex:1;min-width:0}
+  .hist-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;color:#fff}
+  .hist-sub{font-size:11px;color:var(--text-mute);margin-top:2px;
+    font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hist-badges{display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0}
+  .hb{padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;
+    font-family:'JetBrains Mono',monospace}
+  .hb.count{background:rgba(34,197,94,.12);color:#4ade80;border:1px solid rgba(34,197,94,.3)}
+  .hb.status{background:rgba(139,92,246,.12);color:#c4b5fd;border:1px solid rgba(139,92,246,.3)}
+  .pager{display:flex;align-items:center;justify-content:center;gap:14px;
+    margin-top:12px;font-size:12px;color:var(--text-mute)}
+  .pager button{padding:6px 12px;border-radius:8px;background:var(--surface-2);
+    border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:600;cursor:pointer}
+  .pager button:disabled{opacity:.4;cursor:not-allowed}
+
+  .empty{text-align:center;padding:32px 16px;color:var(--text-mute);font-size:13px}
+  .empty .ico{font-size:36px;margin-bottom:8px;opacity:.4;display:block}
+
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:999;
+    display:none;align-items:center;justify-content:center;padding:16px;
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  .modal-bg.show{display:flex}
+  .modal{background:linear-gradient(180deg,var(--surface),#0a0a10);
+    border:1px solid var(--border);border-radius:20px;max-width:480px;
+    width:100%;max-height:90vh;overflow-y:auto;
+    box-shadow:0 24px 64px rgba(0,0,0,.7)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;
+    padding:16px 18px;border-bottom:1px solid var(--border);
+    position:sticky;top:0;background:var(--surface);z-index:2}
+  .modal-head strong{font-size:14px;font-weight:800}
+  .modal-close{width:32px;height:32px;border-radius:10px;background:var(--surface-2);
+    border:1px solid var(--border);color:var(--text-dim);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:14px}
+  .modal-body{padding:18px}
+  .day-block{background:#0a0a10;border:1px solid var(--border);border-radius:12px;
+    padding:11px 13px;margin-bottom:8px}
+  .day-title{display:flex;justify-content:space-between;margin-bottom:6px;
+    font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text)}
+  .day-stats{font-size:11.5px;color:var(--purple-hi);font-family:'JetBrains Mono',monospace}
+
+  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-140%);
+    padding:11px 18px;background:var(--surface-2);border:1px solid var(--border-hi);
+    border-radius:12px;font-size:12.5px;font-weight:600;color:var(--text);z-index:9999;
+    transition:transform .35s cubic-bezier(.16,1,.3,1);
+    box-shadow:0 12px 36px rgba(0,0,0,.6);
+    display:flex;align-items:center;gap:8px;max-width:90vw}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:rgba(34,197,94,.4);
+    background:linear-gradient(180deg,rgba(34,197,94,.15),var(--surface-2))}
+  .toast.err{border-color:rgba(239,68,68,.4);
+    background:linear-gradient(180deg,rgba(239,68,68,.15),var(--surface-2))}
+
+  footer{text-align:center;padding:22px 16px;font-size:11.5px;
+    color:var(--text-mute);font-family:'JetBrains Mono',monospace}
+  footer .links{display:flex;gap:14px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+  footer a{color:var(--purple-hi);text-decoration:none;font-weight:600}
+</style>
+</head>
+<body>
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+
+<div class="wrap">
+  <div class="top-bar">
+    <div class="brand">
+      <div class="brand-logo">M</div>
+      <div class="brand-name">MAHIR <span>/ Like</span></div>
+    </div>
+    <a href="/master" class="master-btn">🔐 Master</a>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="like"><span class="ico">🚀</span> Send Likes</div>
+    <div class="tab" data-tab="history"><span class="ico">📜</span> History</div>
+  </div>
+
+  <!-- ============ LIKE TAB ============ -->
+  <div id="tab-like" class="tab-content">
+    <div class="hero">
+      <h1>MAHIR VIP LIKE</h1>
+      <p>দ্রুত Free Fire প্রোফাইল লাইক — নিরাপদ ও শক্তিশালী</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="ico">🌐</span> Server Region</div>
+      <div class="field">
+        <select id="server" class="input">
+          <option value="BD">🇧🇩 BD — Bangladesh</option>
+          <option value="IND">🇮🇳 IND — India</option>
+          <option value="BR">🇧🇷 BR — Brazil</option>
+          <option value="US">🇺🇸 US — United States</option>
+          <option value="SAC">🌎 SAC — South America</option>
+          <option value="NA">🌎 NA — North America</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="field-head">
+          <label>🎯 Target UID</label>
+          <span class="hint">numeric only</span>
+        </div>
+        <input id="uid" class="input" placeholder="1234567890" inputmode="numeric"/>
+      </div>
+      <div class="field">
+        <div class="field-head">
+          <label>🔑 API Key</label>
+          <span class="hint">user / master</span>
+        </div>
+        <input id="apikey" class="input" placeholder="MAHIR-USER-XXX" type="password" autocomplete="off"/>
+      </div>
+      <button class="btn btn-primary" id="likeBtn" onclick="doLike()">🚀 Send Likes</button>
+    </div>
+
+    <div class="result" id="likeResult">
+      <div class="result-head">
+        <div class="check" id="resCheck">✓</div>
+        <div style="flex:1">
+          <div class="result-title" id="resTitle">Likes Dispatched</div>
+          <div class="result-sub" id="resSub">Successfully sent likes</div>
+        </div>
+      </div>
+
+      <div class="pcard" id="resPcard" style="display:none">
+        <div class="pcard-row">
+          <div id="resAvatarWrap"></div>
+          <div class="pcard-info">
+            <div class="pcard-name" id="resName">—</div>
+            <div class="pcard-uid">
+              <span id="resUid">—</span>
+              <button class="copy-mini" onclick="copyText(document.getElementById('resUid').textContent,'UID')">📋</button>
+            </div>
+            <div class="pcard-chips" id="resChips"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stat-list" id="resStats"></div>
+
+      <div class="bottom-grid">
+        <div class="bstat"><div class="lbl">Total Likes</div><div class="val purple" id="bTotal">0</div></div>
+        <div class="bstat"><div class="lbl">Requests</div><div class="val" id="bReq">0</div></div>
+        <div class="bstat"><div class="lbl">Your Tier</div><div class="val gold" id="bTier">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ HISTORY TAB ============ -->
+  <div id="tab-history" class="tab-content" style="display:none">
+    <div class="hist-section">
+      <div class="hist-head">
+        <h2>📜 Your Like History</h2>
+        <button class="refresh-btn" onclick="loadHistory()">🔄 Refresh</button>
+      </div>
+      <div class="hist-filters">
+        <input id="histSearch" class="input" placeholder="🔍 Search UID / Nickname"/>
+      </div>
+      <div id="historyList">
+        <div class="empty"><span class="ico">⏳</span>Loading…</div>
+      </div>
+      <div class="pager">
+        <button id="histPrev" onclick="prevPage()">◀</button>
+        <span id="histPageInfo">Page 1</span>
+        <button id="histNext" onclick="nextPage()">▶</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    © 2025 MAHIR — Made with precision
+    <div class="links">
+      <a href="https://{{ website }}" target="_blank">🌐 {{ website }}</a>
+      <a href="https://t.me/{{ tg|replace('@','') }}" target="_blank">✈️ Telegram</a>
+      <a href="https://tiktok.com/@{{ tiktok }}" target="_blank">🎵 TikTok</a>
+      <a href="/master">🔐 Master</a>
+    </div>
+  </footer>
+</div>
+
+<!-- UID Detail Modal -->
+<div class="modal-bg" id="uidModal" onclick="if(event.target===this)closeUidModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <strong id="uidModalTitle">Player Detail</strong>
+      <button class="modal-close" onclick="closeUidModal()">✕</button>
+    </div>
+    <div class="modal-body" id="uidModalBody">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let USER_KEY = '';
+let page = 1, size = 20, totalPages = 1;
+let totalLikes = 0, totalReq = 0;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+
+let toastTimer;
+function toast(msg, ok=true){
+  const t = document.getElementById('toast');
+  t.innerHTML = (ok?'✅ ':'❌ ')+esc(msg);
+  t.className = 'toast '+(ok?'ok':'err')+' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 3200);
+}
+function copyText(t, label){
+  if(!t) return;
+  navigator.clipboard.writeText(String(t))
+    .then(()=>toast((label||'Copied')+': '+t,true))
+    .catch(()=>toast('Copy failed',false));
+}
+
+/* --------- AVATAR HELPERS (FIX) --------- */
+function avatarUrls(r){
+  const urls = [];
+  if (r.avatarUrl) urls.push(r.avatarUrl);
+  if (r.headPic) {
+    urls.push(`https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/${r.headPic}.png`);
+  }
+  if (r.avatarId && r.avatarId !== r.headPic) {
+    urls.push(`https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/${r.avatarId}.png`);
+  }
+  return [...new Set(urls.filter(Boolean))];
+}
+function renderAvatar(r, cls, fallbackText){
+  const urls = avatarUrls(r);
+  const letter = (fallbackText || r.nickname || '?').trim().charAt(0).toUpperCase() || '?';
+  if (!urls.length) {
+    return `<div class="${cls}-fb">${esc(letter)}</div>`;
+  }
+  const chain = urls.map(u=>esc(u));
+  const imgId = 'av_'+Math.random().toString(36).slice(2,9);
+  const dataAttr = chain.join('|');
+  return `<img id="${imgId}" class="${cls}" src="${chain[0]}"
+    data-alts="${esc(dataAttr)}" data-letter="${esc(letter)}"
+    onerror="avFallback(this,'${cls}')">`;
+}
+window.avFallback = function(img, cls){
+  const alts = (img.dataset.alts||'').split('|').filter(Boolean);
+  const currentSrc = img.getAttribute('src');
+  const idx = alts.indexOf(currentSrc);
+  if (idx >= 0 && idx < alts.length - 1) {
+    img.setAttribute('src', alts[idx + 1]);
+    return;
+  }
+  const letter = img.dataset.letter || '?';
+  const fb = document.createElement('div');
+  fb.className = cls + '-fb';
+  fb.textContent = letter;
+  img.parentNode.replaceChild(fb, img);
+};
+
+/* --------- TABS --------- */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const tab = t.dataset.tab;
+    document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');
+    document.getElementById('tab-'+tab).style.display='block';
+    if(tab==='history') loadHistory();
+  });
+});
+
+/* --------- LIKE --------- */
+async function doLike(){
+  const uid = document.getElementById('uid').value.trim();
+  const srv = document.getElementById('server').value;
+  const key = document.getElementById('apikey').value.trim();
+  if(!/^\d+$/.test(uid)) return toast('Valid numeric UID required', false);
+  if(!key) return toast('API key required', false);
+  USER_KEY = key; // শুধুমাত্র রানিং রিকোয়েস্টের জন্য ভেরিয়েবলে সেট হবে, লোকালস্টোরেজে সেভ হবে না।
+
+  const btn = document.getElementById('likeBtn');
+  btn.disabled=true; btn.innerHTML='⏳ Sending…';
+
+  try{
+    const r = await fetch(`/mahir&like?uid=${encodeURIComponent(uid)}&server_name=${encodeURIComponent(srv)}&key=${encodeURIComponent(key)}`);
+    const data = await r.json();
+    if(!r.ok || data.error){
+      showResult(data, false);
+      toast(data.error || 'Failed', false);
+    } else {
+      showResult(data, true);
+      toast('Likes sent! +'+(data.LikesGivenByAPI||0), true);
+      totalReq++; totalLikes += (data.LikesGivenByAPI||0);
+      updateBottomStats();
+    }
+  }catch(e){
+    toast('Network error: '+e.message, false);
+  }finally{
+    btn.disabled=false; btn.innerHTML='🚀 Send Likes';
+  }
+}
+
+function updateBottomStats(){
+  document.getElementById('bTotal').textContent = totalLikes;
+  document.getElementById('bReq').textContent = totalReq;
+  const key = document.getElementById('apikey').value.trim();
+  const tier = key.toLowerCase().includes('master') ? 'MASTER' :
+               (key.toLowerCase().includes('user') ? 'USER' : '—');
+  document.getElementById('bTier').textContent = tier;
+}
+
+function showResult(data, ok){
+  const res = document.getElementById('likeResult');
+  res.classList.add('show');
+  res.classList.toggle('err', !ok);
+
+  document.getElementById('resCheck').textContent = ok ? '✓' : '✕';
+  document.getElementById('resTitle').textContent = ok ? 'Likes Dispatched' : 'Failed';
+  document.getElementById('resSub').textContent = ok
+    ? `Successfully sent ${data.LikesGivenByAPI||0} likes`
+    : (data.error || 'Something went wrong');
+
+  const pcard = document.getElementById('resPcard');
+  const avWrap = document.getElementById('resAvatarWrap');
+  if(ok && (data.PlayerNickname || data.avatarUrl || data.headPic)){
+    pcard.style.display='block';
+    avWrap.innerHTML = renderAvatar({
+      avatarUrl: data.avatarUrl,
+      headPic: data.headPic,
+      nickname: data.PlayerNickname
+    }, 'pcard-avatar', data.PlayerNickname);
+    document.getElementById('resName').textContent = data.PlayerNickname || 'Unknown';
+    document.getElementById('resUid').textContent = data.UID || '—';
+
+    const chips = [];
+    if(data.level) chips.push(`<span class="pchip lvl">⭐ Lvl ${data.level}</span>`);
+    if(data.likes!==undefined) chips.push(`<span class="pchip likes">💖 ${Number(data.likes).toLocaleString()}</span>`);
+    if(data.clanName) chips.push(`<span class="pchip clan">👑 ${esc(data.clanName)}</span>`);
+    document.getElementById('resChips').innerHTML = chips.join('');
+  } else {
+    pcard.style.display='none';
+  }
+
+  const stats = ok ? [
+    {l:'Likes Before', v:data.LikesbeforeCommand, cls:''},
+    {l:'Likes After', v:data.LikesafterCommand, cls:'purple'},
+    {l:'Likes Given', v:'+'+(data.LikesGivenByAPI||0), cls:'green'},
+    {l:'Gift Count', v:data.GiftCount||0, cls:''},
+    {l:'Server', v:data.server_name, cls:''},
+    {l:'Tokens', v:data.tokens_generated, cls:''},
+    {l:'Tier', v:data.tier, cls:'gold'}
+  ] : [
+    {l:'Error', v:data.error||'Unknown', cls:'pink'}
+  ];
+
+  document.getElementById('resStats').innerHTML = stats.map(s=>`
+    <div class="stat-row">
+      <span class="lbl">${esc(s.l)}</span>
+      <span class="val ${s.cls}">${esc(s.v)}</span>
+    </div>
+  `).join('');
+}
+
+/* --------- HISTORY --------- */
+async function loadHistory(){
+  const box = document.getElementById('historyList');
+  box.innerHTML = '<div class="empty"><span class="ico">⏳</span>Loading…</div>';
+  USER_KEY = document.getElementById('apikey').value.trim();
+  if(!USER_KEY){
+    box.innerHTML = '<div class="empty"><span class="ico">🔑</span>Enter your API key first</div>';
+    return;
+  }
+  const params = new URLSearchParams({key:USER_KEY, page, page_size:size});
+  const s = document.getElementById('histSearch').value.trim();
+  if(s) params.set('search', s);
+
+  try{
+    const r = await fetch('/api/like-history?'+params.toString());
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error || 'Failed');
+    totalPages = data.pages || 1;
+    document.getElementById('histPageInfo').textContent = `Page ${data.page} / ${totalPages}`;
+
+    if(!data.rows.length){
+      box.innerHTML = '<div class="empty"><span class="ico">📭</span>No history yet</div>';
+      return;
+    }
+    box.innerHTML = data.rows.map(row=>{
+      const av = renderAvatar({
+        avatar_url: row.avatar_url,
+        headPic: row.head_pic,
+        nickname: row.nickname
+      }, 'hist-avatar', row.nickname);
+      const t = row.like_ts ? new Date(row.like_ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+      return `
+        <div class="hist-row" onclick="openUidModal('${esc(row.uid)}')">
+          ${av}
+          <div class="hist-meta">
+            <div class="hist-name">${esc(row.nickname||'Unknown')}</div>
+            <div class="hist-sub">UID: ${esc(row.uid)} · ${esc(row.like_date)} ${t}</div>
+          </div>
+          <div class="hist-badges">
+            <span class="hb count">+${row.like_count}</span>
+            <span class="hb status">${esc(row.request_status||'')}</span>
+          </div>
+        </div>`;
+    }).join('');
+  }catch(e){
+    box.innerHTML = `<div class="empty" style="color:#f87171">${esc(e.message)}</div>`;
+  }
+}
+function prevPage(){ if(page>1){page--;loadHistory();} }
+function nextPage(){ if(page<totalPages){page++;loadHistory();} }
+
+/* --------- MODAL --------- */
+function closeUidModal(){ document.getElementById('uidModal').classList.remove('show'); }
+async function openUidModal(uid){
+  const m = document.getElementById('uidModal');
+  const body = document.getElementById('uidModalBody');
+  m.classList.add('show');
+  document.getElementById('uidModalTitle').textContent = 'UID: '+uid;
+  body.innerHTML = '<div class="empty">Loading…</div>';
+  USER_KEY = document.getElementById('apikey').value.trim();
+  try{
+    const r = await fetch('/api/like-history/'+uid+'?key='+encodeURIComponent(USER_KEY));
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error);
+    const info = data.info || {};
+    const agg = data.aggregate || {total_likes:0, total_requests:0, per_day:[]};
+
+    const av = renderAvatar({
+      avatar_url: info.avatar_url,
+      headPic: info.head_pic,
+      avatarId: info.avatar_id,
+      nickname: info.nickname
+    }, 'pcard-avatar', info.nickname);
+    const avHtml = av.replace('class="pcard-avatar"', 'class="pcard-avatar" style="width:72px;height:72px"')
+                     .replace('class="pcard-avatar-fb"', 'class="pcard-avatar-fb" style="width:72px;height:72px;font-size:28px"');
+
+    const days = (agg.per_day||[]).map(d=>{
+      const t = d.last_ts ? new Date(d.last_ts*1000).toLocaleTimeString() : '';
+      return `
+        <div class="day-block">
+          <div class="day-title">
+            <strong>${esc(d.like_date)}</strong>
+            <span style="color:var(--text-mute)">${t}</span>
+          </div>
+          <div class="day-stats">❤ ${d.likes} likes · ${d.requests} req · ${esc(d.last_status||'')}</div>
+        </div>`;
+    }).join('') || '<div class="empty">No records</div>';
+
+    body.innerHTML = `
+      <div class="pcard" style="margin:0 0 14px 0">
+        <div class="pcard-row">
+          ${avHtml}
+          <div class="pcard-info">
+            <div class="pcard-name">${esc(info.nickname||'Unknown')}</div>
+            <div class="pcard-uid">${esc(uid)}</div>
+            <div class="pcard-chips">
+              <span class="pchip likes">❤ ${agg.total_likes} total</span>
+              <span class="pchip lvl">${agg.total_requests} req</span>
+              ${data.is_blocked?'<span class="pchip" style="background:rgba(239,68,68,.25);border-color:rgba(239,68,68,.5);color:#fca5a5">🚫 BLOCKED</span>':''}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;font-size:12px;color:var(--text-dim)">Per-day breakdown:</div>
+      ${days}
+      <div style="display:flex;gap:8px;margin-top:14px">
+        ${data.is_blocked
+          ? `<button class="btn" style="background:#22c55e;color:#fff" onclick="unblockUid('${esc(uid)}')">✅ Unblock</button>`
+          : `<button class="btn" style="background:#ef4444;color:#fff" onclick="blockUid('${esc(uid)}')">🚫 Block</button>`}
+      </div>
+    `;
+  }catch(e){
+    body.innerHTML = `<div class="empty" style="color:#f87171">${esc(e.message)}</div>`;
+  }
+}
+
+async function blockUid(uid){
+  if(!confirm('Block UID '+uid+'?')) return;
+  USER_KEY = document.getElementById('apikey').value.trim();
+  const r = await fetch('/api/uid-block/'+uid,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:USER_KEY,reason:'user-block'})});
+  if(r.ok){toast('Blocked',true);openUidModal(uid);loadHistory();}
+  else toast('Failed',false);
+}
+async function unblockUid(uid){
+  if(!confirm('Unblock UID '+uid+'?')) return;
+  USER_KEY = document.getElementById('apikey').value.trim();
+  const r = await fetch('/api/uid-unblock/'+uid,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:USER_KEY})});
+  if(r.ok){toast('Unblocked',true);openUidModal(uid);loadHistory();}
+  else toast('Master key required',false);
+}
+
+/* --------- init --------- */
+document.getElementById('apikey').addEventListener('input', e=>{
+  USER_KEY = e.target.value.trim();
+  updateBottomStats();
+});
+document.getElementById('uid').addEventListener('keydown', e=>{if(e.key==='Enter')doLike();});
+document.getElementById('histSearch').addEventListener('input', ()=>{page=1; loadHistory();});
+updateBottomStats();
+</script>
+</body>
+</html>

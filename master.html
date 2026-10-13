@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title>Master Panel — {{ brand }}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  :root{
+    --bg:#08080c;--surface:#0f0f16;--surface-2:#15151f;--surface-3:#1c1c28;
+    --border:#25253a;--border-hi:#35354a;
+    --text:#f0f0f8;--text-dim:#8b8ba7;--text-mute:#5a5a70;
+    --purple:#8b5cf6;--purple-hi:#a78bfa;--purple-soft:rgba(139,92,246,.15);
+    --pink:#ec4899;--green:#22c55e;--gold:#fbbf24;--red:#ef4444;
+    --orange:#f97316;--cyan:#06b6d4;
+  }
+  html,body{background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;
+    font-family:'Inter',-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding-bottom:60px}
+
+  .glow{position:fixed;pointer-events:none;z-index:0}
+  .glow-1{top:-200px;left:50%;transform:translateX(-50%);width:600px;height:600px;
+    background:radial-gradient(circle,rgba(139,92,246,.15) 0%,transparent 65%);filter:blur(80px)}
+
+  .wrap{position:relative;z-index:1;max-width:560px;margin:0 auto;padding:16px}
+
+  /* login */
+  .login-wrap{min-height:80vh;display:flex;align-items:center;justify-content:center}
+  .login-card{width:100%;max-width:380px;
+    background:linear-gradient(180deg,var(--surface),#0a0a10);
+    border:1px solid var(--border);border-radius:20px;padding:28px;
+    box-shadow:0 24px 64px rgba(0,0,0,.6)}
+  .login-icon{width:56px;height:56px;border-radius:16px;
+    background:linear-gradient(135deg,#f59e0b,#ef4444);
+    display:flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:16px;
+    box-shadow:0 0 30px rgba(245,158,11,.4)}
+  .login-card h2{font-size:22px;font-weight:900;letter-spacing:-.02em;margin-bottom:6px}
+  .login-card p{font-size:13px;color:var(--text-dim);margin-bottom:22px}
+
+  /* top bar */
+  .top-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 4px 16px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand-logo{width:36px;height:36px;border-radius:10px;
+    background:linear-gradient(135deg,#f59e0b,#ef4444);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:900;font-size:15px;color:#fff;
+    box-shadow:0 0 20px rgba(245,158,11,.5)}
+  .brand-name{font-weight:800;font-size:15px}
+  .brand-name span{color:var(--text-mute);font-weight:500}
+  .logout-btn{padding:7px 14px;border-radius:10px;font-size:12px;font-weight:700;
+    background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);
+    cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+
+  /* tabs */
+  .tabs{display:flex;gap:4px;padding:4px;background:var(--surface);
+    border:1px solid var(--border);border-radius:14px;margin-bottom:16px;
+    overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{flex:1 0 auto;min-width:80px;padding:10px 8px;border-radius:10px;text-align:center;
+    font-size:11.5px;font-weight:700;color:var(--text-mute);cursor:pointer;
+    transition:all .2s;display:flex;align-items:center;justify-content:center;gap:4px;
+    border:1px solid transparent;background:transparent;white-space:nowrap}
+  .tab.active{background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;
+    box-shadow:0 4px 14px rgba(139,92,246,.4)}
+  .tab .ico{font-size:13px}
+
+  .tab-content{animation:fadeUp .3s}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+  .panel-title{font-size:18px;font-weight:900;letter-spacing:-.02em;margin-bottom:6px;
+    display:flex;align-items:center;gap:8px}
+  .panel-sub{font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.5}
+
+  .card{background:linear-gradient(180deg,var(--surface),#0a0a10);
+    border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px}
+
+  .action-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  .action-btn{padding:14px;border-radius:12px;border:none;font-family:inherit;
+    font-size:13.5px;font-weight:800;cursor:pointer;transition:all .15s;
+    display:flex;align-items:center;justify-content:center;gap:7px}
+  .action-btn:active{transform:scale(.98)}
+  .action-run{background:linear-gradient(180deg,#f97316,#ea580c);color:#fff;
+    box-shadow:0 6px 18px rgba(249,115,22,.35)}
+  .action-refresh{background:linear-gradient(180deg,#1c1c28,#15151f);color:#f0f0f8;
+    border:1px solid #35354a}
+
+  .server-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;margin-bottom:12px}
+  .server-tabs::-webkit-scrollbar{display:none}
+  .srv-tab{padding:8px 16px;border-radius:10px;font-size:12.5px;font-weight:800;
+    background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);
+    cursor:pointer;transition:all .15s;white-space:nowrap;flex-shrink:0}
+  .srv-tab.active{background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;
+    border-color:transparent;box-shadow:0 4px 12px rgba(139,92,246,.35)}
+
+  .row-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  .row-btn{padding:12px;border-radius:12px;font-family:inherit;
+    font-size:13px;font-weight:800;cursor:pointer;transition:all .15s;
+    display:flex;align-items:center;justify-content:center;gap:7px;border:none}
+  .row-btn:active{transform:scale(.98)}
+  .row-bulk{background:linear-gradient(180deg,#22c55e,#16a34a);color:#fff}
+  .row-clear{background:linear-gradient(180deg,#ef4444,#dc2626);color:#fff}
+
+  .server-head{display:flex;align-items:center;justify-content:space-between;
+    margin-bottom:12px;padding:0 2px}
+  .server-title{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:800}
+  .server-title .flag{font-size:20px}
+  .server-date{font-size:11.5px;color:var(--text-mute);
+    font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:4px}
+
+  /* player card (matches screenshot) */
+  .pcard{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+    border:1px solid rgba(139,92,246,.25);border-radius:16px;
+    padding:14px;position:relative;overflow:hidden;margin-bottom:10px;
+    transition:all .2s;cursor:pointer}
+  .pcard::before{content:'';position:absolute;top:0;right:0;width:65%;height:100%;
+    background:radial-gradient(circle at 85% 30%,rgba(139,92,246,.30),transparent 70%);
+    pointer-events:none}
+  .pcard:active{border-color:rgba(139,92,246,.5);transform:scale(.99)}
+  .pcard-row{display:flex;align-items:flex-start;gap:12px;position:relative;z-index:1}
+  .pcard-avatar{width:72px;height:72px;border-radius:14px;
+    border:3px solid rgba(255,255,255,.15);object-fit:cover;background:#0a0a10;
+    flex-shrink:0;box-shadow:0 6px 18px rgba(0,0,0,.5);display:block}
+  .pcard-avatar-fb{width:72px;height:72px;border-radius:14px;
+    border:3px solid rgba(255,255,255,.15);
+    display:flex;align-items:center;justify-content:center;
+    font-size:28px;font-weight:900;color:#fff;flex-shrink:0;
+    background:linear-gradient(135deg,#8b5cf6,#ec4899)}
+  .pcard-info{flex:1;min-width:0}
+  .pcard-name{font-size:15px;font-weight:800;letter-spacing:-.01em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5);margin-bottom:3px}
+  .pcard-uid{font-size:12px;color:rgba(255,255,255,.75);
+    font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:6px}
+  .copy-mini{padding:2px 6px;border-radius:6px;background:rgba(255,255,255,.1);
+    border:1px solid rgba(255,255,255,.15);color:#fff;font-size:10px;
+    cursor:pointer;font-weight:600}
+  .pcard-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .pchip{padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;
+    font-family:'JetBrains Mono',monospace;display:inline-flex;align-items:center;gap:4px}
+  .pchip.lvl{background:rgba(139,92,246,.25);border:1px solid rgba(167,139,250,.5);color:#c4b5fd}
+  .pchip.likes{background:rgba(236,72,153,.22);border:1px solid rgba(236,72,153,.45);color:#f9a8d4}
+  .pchip.clan{background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.4);color:#fcd34d}
+  .pchip.server{background:rgba(6,182,212,.15);border:1px solid rgba(6,182,212,.4);color:#67e8f9}
+
+  .pcard-bottom{margin-top:10px;display:flex;align-items:center;justify-content:space-between;
+    position:relative;z-index:1}
+  .like-badge{padding:5px 11px;border-radius:999px;font-size:11px;font-weight:800;
+    font-family:'JetBrains Mono',monospace;
+    background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);color:#4ade80}
+  .like-badge.pending{background:rgba(249,115,22,.15);
+    border-color:rgba(249,115,22,.4);color:#fb923c}
+  .like-badge.blocked{background:rgba(239,68,68,.15);
+    border-color:rgba(239,68,68,.4);color:#f87171}
+
+  .remove-btn{position:absolute;top:10px;right:10px;z-index:3;
+    width:32px;height:32px;border-radius:10px;
+    background:linear-gradient(180deg,#ef4444,#dc2626);color:#fff;border:none;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;
+    font-size:16px;font-weight:800;box-shadow:0 4px 12px rgba(239,68,68,.4)}
+
+  /* info store row */
+  .info-row{display:flex;align-items:center;gap:12px;padding:11px 12px;
+    background:#0a0a10;border:1px solid var(--border);border-radius:12px;
+    margin-bottom:8px;cursor:pointer;transition:all .15s}
+  .info-row:active{border-color:var(--purple);background:var(--surface-2)}
+  .info-avatar{width:52px;height:52px;border-radius:12px;object-fit:cover;
+    background:#15151f;flex-shrink:0;border:2px solid rgba(139,92,246,.3);display:block}
+  .info-avatar-fb{width:52px;height:52px;border-radius:12px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:20px;font-weight:900;color:#fff;flex-shrink:0;
+    background:linear-gradient(135deg,#8b5cf6,#ec4899);
+    border:2px solid rgba(139,92,246,.3)}
+  .info-meta{flex:1;min-width:0}
+  .info-name{font-size:13.5px;font-weight:800;color:#fff;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .info-uid{font-size:11.5px;color:var(--text-mute);
+    font-family:'JetBrains Mono',monospace;margin-top:2px}
+  .info-chips{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+  .info-chip{padding:3px 8px;border-radius:999px;font-size:10.5px;font-weight:700;
+    font-family:'JetBrains Mono',monospace}
+  .info-chip.lvl{background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.35);color:#c4b5fd}
+  .info-chip.likes{background:rgba(236,72,153,.15);border:1px solid rgba(236,72,153,.35);color:#f9a8d4}
+
+  .empty{text-align:center;padding:32px 16px;color:var(--text-mute);font-size:13px}
+  .empty .ico{font-size:40px;margin-bottom:8px;opacity:.4;display:block}
+
+  .search-box{margin-bottom:12px}
+  .input{width:100%;padding:12px 14px;background:#0a0a10;border:1px solid var(--border);
+    border-radius:12px;color:var(--text);font-size:13.5px;font-weight:500;
+    font-family:inherit;outline:none;transition:all .15s}
+  .input:focus{border-color:var(--purple);box-shadow:0 0 0 4px rgba(139,92,246,.12)}
+  .input::placeholder{color:var(--text-mute)}
+  select.input{cursor:pointer;appearance:none;
+    background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8ba7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
+  option{background:#15151f;color:#f0f0f8}
+
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;
+    display:none;align-items:center;justify-content:center;padding:16px;
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  .modal-bg.show{display:flex}
+  .modal{background:linear-gradient(180deg,var(--surface),#0a0a10);
+    border:1px solid var(--border);border-radius:20px;max-width:500px;
+    width:100%;max-height:90vh;overflow-y:auto;
+    box-shadow:0 24px 64px rgba(0,0,0,.7)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;
+    padding:16px 18px;border-bottom:1px solid var(--border);
+    position:sticky;top:0;background:var(--surface);z-index:2}
+  .modal-head strong{font-size:14.5px;font-weight:800}
+  .modal-close{width:34px;height:34px;border-radius:10px;background:var(--surface-2);
+    border:1px solid var(--border);color:var(--text-dim);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:15px}
+  .modal-body{padding:18px}
+  .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+  .detail-item{background:#0a0a10;border:1px solid var(--border);
+    border-radius:10px;padding:10px}
+  .detail-item .lbl{font-size:10px;color:var(--text-mute);text-transform:uppercase;
+    letter-spacing:.06em;margin-bottom:3px;font-weight:700}
+  .detail-item .val{font-size:12.5px;font-weight:700;
+    font-family:'JetBrains Mono',monospace;color:var(--text);
+    word-break:break-word}
+
+  .file-list{display:flex;flex-direction:column;gap:6px}
+  .file-item{display:flex;align-items:center;gap:10px;padding:11px 14px;
+    border-radius:10px;background:#0a0a10;border:1px solid var(--border);
+    cursor:pointer;transition:all .15s}
+  .file-item:active{border-color:var(--purple);background:var(--surface-2)}
+  .file-icon{width:32px;height:32px;border-radius:8px;display:flex;
+    align-items:center;justify-content:center;font-size:14px;flex-shrink:0;
+    background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.2)}
+  .file-icon.json{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.25)}
+  .file-name{font-size:13px;font-weight:600;color:#fff}
+  .file-meta{font-size:11px;color:var(--text-mute);font-family:'JetBrains Mono',monospace}
+  textarea.editor{width:100%;min-height:320px;padding:14px;background:#0a0a10;
+    color:var(--text);border:1px solid var(--border);border-radius:12px;
+    outline:none;resize:vertical;font-family:'JetBrains Mono',monospace;
+    font-size:12.5px;line-height:1.6;font-weight:500}
+  textarea.editor:focus{border-color:var(--purple)}
+
+  .kv-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px}
+  .kv-row input{padding:10px 12px;background:#0a0a10;border:1px solid var(--border);
+    border-radius:10px;color:var(--text);font-size:12.5px;font-family:'JetBrains Mono',monospace;
+    outline:none}
+  .kv-row input:focus{border-color:var(--purple)}
+  .kv-del{width:36px;padding:0;border-radius:10px;background:var(--red);color:#fff;
+    border:none;cursor:pointer;font-weight:700}
+  .btn-sm{padding:8px 14px;border-radius:10px;font-family:inherit;font-size:12px;
+    font-weight:700;cursor:pointer;border:1px solid var(--border);
+    background:var(--surface-2);color:var(--text);display:inline-flex;
+    align-items:center;gap:5px}
+  .btn-sm.primary{background:linear-gradient(180deg,#8b5cf6,#7c3aed);
+    border:none;color:#fff}
+  .btn-sm.success{background:linear-gradient(180deg,#22c55e,#16a34a);border:none;color:#fff}
+  .btn-sm.danger{background:linear-gradient(180deg,#ef4444,#dc2626);border:none;color:#fff}
+  .btn-sm.block{width:100%;justify-content:center;padding:12px}
+
+  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-140%);
+    padding:11px 18px;background:var(--surface-2);border:1px solid var(--border-hi);
+    border-radius:12px;font-size:12.5px;font-weight:600;color:var(--text);z-index:9999;
+    transition:transform .35s cubic-bezier(.16,1,.3,1);
+    box-shadow:0 12px 36px rgba(0,0,0,.6);
+    display:flex;align-items:center;gap:8px;max-width:90vw}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:rgba(34,197,94,.4);
+    background:linear-gradient(180deg,rgba(34,197,94,.15),var(--surface-2))}
+  .toast.err{border-color:rgba(239,68,68,.4);
+    background:linear-gradient(180deg,rgba(239,68,68,.15),var(--surface-2))}
+
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="glow glow-1"></div>
+
+<!-- LOGIN -->
+<div id="loginShell" class="wrap">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-icon">🔐</div>
+      <h2>Master Access</h2>
+      <p>Enter master password to unlock the panel</p>
+      <div style="margin-bottom:14px">
+        <input id="masterKey" class="input" type="password" placeholder="••••••••••••" autocomplete="current-password"/>
+      </div>
+      <button class="btn-sm primary block" style="font-size:14px;padding:14px"
+        onclick="doLogin()">🔓 Unlock Panel</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="mainShell" class="wrap hidden">
+  <div class="top-bar">
+    <div class="brand">
+      <div class="brand-logo">M</div>
+      <div class="brand-name">MAHIR <span>/ Master</span></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a href="/" class="logout-btn">👤 User</a>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs" id="mainTabs">
+    <div class="tab active" data-tab="auto"><span class="ico">🤖</span> Auto</div>
+    <div class="tab" data-tab="lookup"><span class="ico">👤</span> Lookup</div>
+    <div class="tab" data-tab="info"><span class="ico">🗄️</span> Info Store</div>
+    <div class="tab" data-tab="settings"><span class="ico">⚙️</span> Settings</div>
+  </div>
+
+  <!-- =========== TAB: AUTO =========== -->
+  <div id="tab-auto" class="tab-content">
+    <div class="panel-title">🤖 Auto-Like UIDs</div>
+
+    <div class="action-row">
+      <button class="action-btn action-run" onclick="runAuto()">▶ Run Now</button>
+      <button class="action-btn action-refresh" onclick="loadAuto()">🔄 Refresh</button>
+    </div>
+
+    <div class="panel-sub">
+      প্রতিদিন 04:10 (Asia/Dhaka) স্বয়ংক্রিয়ভাবে লাইক পাঠানো হয় · Card-এ ক্লিক করলে সম্পূর্ণ info দেখাবে
+    </div>
+
+    <div class="server-tabs" id="serverTabs"></div>
+
+    <div class="row-actions">
+      <button class="row-btn row-bulk" onclick="openBulk()">⬆️ Bulk Upload</button>
+      <button class="row-btn row-clear" onclick="clearCurrentServer()">🗑️ Clear Server</button>
+    </div>
+
+    <div id="autoContent"></div>
+  </div>
+
+  <!-- =========== TAB: LOOKUP =========== -->
+  <div id="tab-lookup" class="tab-content" style="display:none">
+    <div class="panel-title">👤 Player Lookup</div>
+    <div class="panel-sub">যেকোনো UID দিয়ে Free Fire প্রোফাইল দেখুন</div>
+
+    <div class="card">
+      <div style="margin-bottom:10px">
+        <input id="lookupUid" class="input" placeholder="Enter UID..." inputmode="numeric"/>
+      </div>
+      <div style="margin-bottom:12px">
+        <select id="lookupServer" class="input">
+          <option value="BD">🇧🇩 BD</option>
+          <option value="IND">🇮🇳 IND</option>
+          <option value="BR">🇧🇷 BR</option>
+          <option value="US">🇺🇸 US</option>
+          <option value="SAC">🌎 SAC</option>
+          <option value="NA">🌎 NA</option>
+        </select>
+      </div>
+      <button class="btn-sm primary block" style="font-size:14px;padding:14px"
+        onclick="doLookup()">🔍 Lookup Player</button>
+    </div>
+
+    <div id="lookupResult"></div>
+  </div>
+
+  <!-- =========== TAB: INFO STORE =========== -->
+  <div id="tab-info" class="tab-content" style="display:none">
+    <div class="panel-title">🗄️ Info Store</div>
+    <div class="panel-sub">প্রতিদিন লাইক পাঠানোর সময় UID-এর info fetch করে এখানে জমা হয়</div>
+
+    <div class="search-box">
+      <input id="infoSearch" class="input" placeholder="🔍 Search by UID / Nickname..."/>
+    </div>
+
+    <div id="infoStoreList"></div>
+
+    <div class="pager" style="display:flex;gap:12px;justify-content:center;align-items:center;margin-top:14px;font-size:12px;color:var(--text-mute)">
+      <button class="btn-sm" onclick="infoStorePrev()">◀</button>
+      <span id="infoStorePageInfo">Page 1</span>
+      <button class="btn-sm" onclick="infoStoreNext()">▶</button>
+    </div>
+  </div>
+
+  <!-- =========== TAB: SETTINGS =========== -->
+  <div id="tab-settings" class="tab-content" style="display:none">
+    <div class="panel-title">⚙️ Settings</div>
+    <div class="panel-sub">Files, Keys, Blocked UIDs, Actions</div>
+
+    <!-- Files -->
+    <div class="card">
+      <div class="panel-title" style="font-size:14px;margin-bottom:10px">📁 File Editor</div>
+      <div class="file-list" id="fileList"></div>
+      <div id="editorWrap" class="hidden" style="margin-top:12px">
+        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+          <strong id="editorName" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12.5px"></strong>
+          <button class="btn-sm" onclick="reloadFile()">↻</button>
+          <button class="btn-sm primary" onclick="saveFile()">💾 Save</button>
+        </div>
+        <textarea id="editorArea" class="editor"></textarea>
+      </div>
+    </div>
+
+    <!-- Keys -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="panel-title" style="font-size:14px;margin:0">🔑 API Keys</div>
+        <button class="btn-sm primary" onclick="saveKeys()">💾 Save</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:8px">User Keys</div>
+      <div id="userKeysList"></div>
+      <button class="btn-sm" style="width:100%;justify-content:center;margin-top:6px" onclick="addUserKey()">+ Add User Key</button>
+
+      <div style="font-size:11.5px;color:var(--text-dim);margin:14px 0 8px">Master Keys</div>
+      <div id="masterKeysList"></div>
+      <button class="btn-sm" style="width:100%;justify-content:center;margin-top:6px" onclick="addMasterKey()">+ Add Master Key</button>
+
+      <div style="margin-top:14px">
+        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px">Reset Timezone</div>
+        <input id="resetTz" class="input" value="Asia/Dhaka"/>
+      </div>
+    </div>
+
+    <!-- Blocked -->
+    <div class="card">
+      <div class="panel-title" style="font-size:14px;margin-bottom:10px">🚫 Blocked UIDs</div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:10px">
+        <input id="blockUidInput" class="input" placeholder="Enter UID to block"/>
+        <button class="btn-sm danger" onclick="doBlockUid()">Block</button>
+      </div>
+      <div id="blockedList"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card">
+      <div class="panel-title" style="font-size:14px;margin-bottom:10px">⚡ Actions</div>
+      <button class="btn-sm success block" style="margin-bottom:8px" onclick="runAuto()">▶ Run Auto-Like Now</button>
+      <button class="btn-sm primary block" onclick="refreshJwt()">↻ Refresh All JWTs</button>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+      <div class="panel-title" style="font-size:14px;margin-bottom:10px">📊 Stats</div>
+      <div id="statsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+    </div>
+
+    <!-- Daily Usage -->
+    <div class="card">
+      <div class="panel-title" style="font-size:14px;margin-bottom:10px">📈 Daily Usage</div>
+      <input type="date" id="usageDate" class="input" style="margin-bottom:10px" onchange="loadUsageDetail()"/>
+      <div id="usageTableBody"></div>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="panel-title" style="font-size:14px;margin:0">📜 Activity Log</div>
+        <button class="btn-sm" onclick="document.getElementById('logBox').innerHTML=''">Clear</button>
+      </div>
+      <div class="log" id="logBox"
+        style="background:#0a0a10;border:1px solid var(--border);border-radius:10px;
+        padding:12px;font-family:'JetBrains Mono',monospace;font-size:11.5px;
+        line-height:1.7;max-height:240px;overflow-y:auto;color:var(--text-dim)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- BULK UPLOAD MODAL -->
+<div class="modal-bg" id="bulkModal" onclick="if(event.target===this)closeBulk()">
+  <div class="modal">
+    <div class="modal-head">
+      <strong>📦 Bulk Upload UIDs</strong>
+      <button class="modal-close" onclick="closeBulk()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:10px">
+        <select id="bulkServer" class="input">
+          <option value="BD">🇧🇩 BD</option><option value="IND">🇮🇳 IND</option>
+          <option value="BR">🇧🇷 BR</option><option value="US">🇺🇸 US</option>
+          <option value="SAC">🌎 SAC</option><option value="NA">🌎 NA</option>
+        </select>
+      </div>
+      <div style="margin-bottom:10px">
+        <select id="bulkMode" class="input">
+          <option value="replace">🔄 Replace</option>
+          <option value="append">➕ Append</option>
+        </select>
+      </div>
+      <textarea id="bulkText" class="input"
+        placeholder="Paste UIDs (one per line / comma separated)"
+        style="min-height:130px;font-family:'JetBrains Mono',monospace;
+        font-size:12.5px;resize:vertical"></textarea>
+      <button class="btn-sm primary block" style="margin-top:10px;font-size:14px;padding:14px"
+        onclick="submitBulk()">📥 Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD UID MODAL -->
+<div class="modal-bg" id="addModal" onclick="if(event.target===this)closeAdd()">
+  <div class="modal">
+    <div class="modal-head">
+      <strong>➕ Add UID</strong>
+      <button class="modal-close" onclick="closeAdd()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input id="addUidInput" class="input" placeholder="Enter UID..."
+        inputmode="numeric" style="margin-bottom:10px"/>
+      <select id="addServerInput" class="input" style="margin-bottom:12px">
+        <option value="BD">🇧🇩 BD</option><option value="IND">🇮🇳 IND</option>
+        <option value="BR">🇧🇷 BR</option><option value="US">🇺🇸 US</option>
+        <option value="SAC">🌎 SAC</option><option value="NA">🌎 NA</option>
+      </select>
+      <button class="btn-sm success block" style="font-size:14px;padding:14px"
+        onclick="submitAdd()">➕ Add & Fetch Info</button>
+    </div>
+  </div>
+</div>
+
+<!-- PLAYER DETAIL MODAL -->
+<div class="modal-bg" id="detailModal" onclick="if(event.target===this)closeDetail()">
+  <div class="modal">
+    <div class="modal-head">
+      <strong id="detailTitle">Player Detail</strong>
+      <button class="modal-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="modal-body" id="detailBody">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let MASTER_KEY = localStorage.getItem('mahir_master_key') || '';
+let CURRENT_SERVER = 'BD';
+let AUTO_DATA = {};
+let INFO_PAGE = 1;
+let CURRENT_FILE = null;
+
+const SERVER_FLAGS = {BD:'🇧🇩',IND:'🇮🇳',BR:'🇧🇷',US:'🇺🇸',SAC:'🌎',NA:'🌎'};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+let toastTimer;
+function toast(msg, ok=true){
+  const t = document.getElementById('toast');
+  t.innerHTML = (ok?'✅ ':'❌ ')+esc(msg);
+  t.className = 'toast '+(ok?'ok':'err')+' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 3200);
+}
+function copyText(t, label){
+  if(!t) return;
+  navigator.clipboard.writeText(String(t))
+    .then(()=>toast((label||'Copied')+': '+t,true))
+    .catch(()=>toast('Copy failed',false));
+}
+
+/* --------- AVATAR (FIXED) --------- */
+function avatarUrls(r){
+  const urls = [];
+  if (r.avatarUrl) urls.push(r.avatarUrl);
+  const pic = r.headPic || r.head_pic;
+  if (pic) urls.push(`https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/${pic}.png`);
+  const avId = r.avatarId;
+  if (avId && avId !== pic) {
+    urls.push(`https://cdn.jsdelivr.net/gh/ShahGCreator/icon@main/PNG/${avId}.png`);
+  }
+  return [...new Set(urls.filter(Boolean))];
+}
+function renderAvatar(r, cls, fallbackText){
+  const urls = avatarUrls(r);
+  const letter = (fallbackText || r.nickname || '?').trim().charAt(0).toUpperCase() || '?';
+  if (!urls.length) return `<div class="${cls}-fb">${esc(letter)}</div>`;
+  const alts = urls.map(u=>esc(u)).join('|');
+  return `<img class="${cls}" src="${esc(urls[0])}"
+    data-alts="${alts}" data-letter="${esc(letter)}"
+    onerror="avFallback(this,'${cls}')">`;
+}
+window.avFallback = function(img, cls){
+  const alts = (img.dataset.alts||'').split('|').filter(Boolean);
+  const cur = img.getAttribute('src');
+  const idx = alts.indexOf(cur);
+  if (idx >= 0 && idx < alts.length - 1) {
+    img.setAttribute('src', alts[idx + 1]);
+    return;
+  }
+  const letter = img.dataset.letter || '?';
+  const fb = document.createElement('div');
+  fb.className = cls + '-fb';
+  fb.textContent = letter;
+  img.parentNode.replaceChild(fb, img);
+};
+
+/* --------- LOGIN --------- */
+function doLogin(){
+  const k = document.getElementById('masterKey').value.trim();
+  if(!k) return toast('Enter password', false);
+  MASTER_KEY = k;
+  localStorage.setItem('mahir_master_key', k);
+  verifyAndEnter();
+}
+function logout(){
+  localStorage.removeItem('mahir_master_key');
+  MASTER_KEY = '';
+  document.getElementById('mainShell').classList.add('hidden');
+  document.getElementById('loginShell').classList.remove('hidden');
+}
+async function verifyAndEnter(){
+  try{
+    const r = await fetch('/master/api/files?key='+encodeURIComponent(MASTER_KEY));
+    if(r.status !== 200) throw new Error('Invalid master password');
+    document.getElementById('loginShell').classList.add('hidden');
+    document.getElementById('mainShell').classList.remove('hidden');
+    toast('Welcome, Master', true);
+    loadAll();
+  }catch(e){
+    toast(e.message||'Login failed', false);
+    localStorage.removeItem('mahir_master_key');
+    MASTER_KEY = '';
+  }
+}
+
+/* --------- TABS --------- */
+document.querySelectorAll('#mainTabs .tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('#mainTabs .tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const name = t.dataset.tab;
+    document.querySelectorAll('.tab-content').forEach(c=>c.style.display='none');
+    document.getElementById('tab-'+name).style.display='block';
+    if(name==='auto') loadAuto();
+    if(name==='info') loadInfoStore();
+    if(name==='settings') loadSettings();
+  });
+});
+
+/* --------- API --------- */
+async function api(path, opts={}){
+  const sep = path.includes('?')?'&':'?';
+  const url = path+sep+'key='+encodeURIComponent(MASTER_KEY);
+  const r = await fetch(url, opts);
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error||('HTTP '+r.status));
+  return data;
+}
+
+async function loadAll(){ loadAuto(); }
+
+/* =====================================================
+   TAB 1: AUTO-LIKE UIDs
+   ===================================================== */
+function renderServerTabs(){
+  document.getElementById('serverTabs').innerHTML =
+    Object.keys(SERVER_FLAGS).map(s=>
+      `<div class="srv-tab ${s===CURRENT_SERVER?'active':''}"
+        onclick="switchServer('${s}')">${s}</div>`).join('');
+}
+function switchServer(s){ CURRENT_SERVER = s; renderServerTabs(); renderAutoContent(); }
+
+async function loadAuto(){
+  try{
+    const data = await api('/master/api/auto-with-info');
+    AUTO_DATA = data.auto_with_info || {};
+    renderServerTabs();
+    renderAutoContent();
+  }catch(e){ toast('Auto load failed: '+e.message, false); }
+}
+
+function renderAutoContent(){
+  const uids = AUTO_DATA[CURRENT_SERVER] || [];
+  const el = document.getElementById('autoContent');
+  const flag = SERVER_FLAGS[CURRENT_SERVER];
+  const today = new Date().toISOString().slice(0,10);
+
+  if(!uids.length){
+    el.innerHTML = `
+      <div class="server-head">
+        <div class="server-title"><span class="flag">${flag}</span> ${CURRENT_SERVER} — 0 UIDs</div>
+      </div>
+      <div class="card">
+        <div class="empty"><span class="ico">📭</span>No UIDs in ${CURRENT_SERVER}.<br>Use Bulk Upload or Add UID.</div>
+      </div>`;
+    return;
+  }
+
+  const cards = uids.map(u=>renderPlayerCard(u, CURRENT_SERVER)).join('');
+
+  el.innerHTML = `
+    <div class="server-head">
+      <div class="server-title"><span class="flag">${flag}</span> ${CURRENT_SERVER} — ${uids.length} UID${uids.length>1?'s':''}</div>
+      <div class="server-date">🕐 Today: ${today}</div>
+    </div>
+    ${cards}
+  `;
+}
+
+function renderPlayerCard(r, srv){
+  const uid = r.uid;
+  const nick = r.nickname || 'Unknown';
+  const lvl = r.level ?? '—';
+  const likes = r.likes ?? 0;
+  const likesFmt = Number(likes).toLocaleString();
+  const av = renderAvatar(r, 'pcard-avatar', nick);
+  const clan = r.clanName ? esc(r.clanName) : '';
+
+  let badge = '';
+  if(r.is_blocked){
+    badge = `<span class="like-badge blocked">🚫 BLOCKED</span>`;
+  } else if(r.last_likes_given != null){
+    badge = `<span class="like-badge">💚 ${r.last_likes_given} likes today</span>`;
+  } else {
+    badge = `<span class="like-badge pending">⏳ pending</span>`;
+  }
+
+  return `
+    <div class="pcard" onclick="openDetail('${uid}')">
+      <button class="remove-btn"
+        onclick="event.stopPropagation();removeUid('${srv}','${uid}')">✕</button>
+      <div class="pcard-row">
+        ${av}
+        <div class="pcard-info">
+          <div class="pcard-name">${esc(nick)}</div>
+          <div class="pcard-uid">
+            ${uid}
+            <button class="copy-mini"
+              onclick="event.stopPropagation();copyText('${uid}','UID')">📋</button>
+          </div>
+          <div class="pcard-chips">
+            <span class="pchip lvl">⭐ Lvl ${lvl}</span>
+            <span class="pchip likes">💖 ${likesFmt}</span>
+            ${clan?`<span class="pchip clan">👑 ${clan}</span>`:''}
+          </div>
+        </div>
+      </div>
+      <div class="pcard-bottom">
+        ${badge}
+        <span class="pchip server">${SERVER_FLAGS[srv]} ${srv}</span>
+      </div>
+    </div>
+  `;
+}
+
+async function removeUid(srv, uid){
+  if(!confirm(`Remove ${uid} from ${srv}?`)) return;
+  try{
+    await api('/master/api/auto/remove',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, uid, server_name:srv})});
+    toast('Removed '+uid, true);
+    loadAuto();
+  }catch(e){ toast('Remove failed: '+e.message, false); }
+}
+
+async function clearCurrentServer(){
+  if(!confirm(`Clear ALL UIDs from ${CURRENT_SERVER}?`)) return;
+  try{
+    await api('/master/api/auto/clear',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, server_name:CURRENT_SERVER})});
+    toast('Cleared '+CURRENT_SERVER, true);
+    loadAuto();
+  }catch(e){ toast('Clear failed: '+e.message, false); }
+}
+
+async function runAuto(){
+  if(!confirm('Run auto-like now?')) return;
+  try{
+    await api('/master/api/run-auto',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY})});
+    toast('Auto-like triggered in background', true);
+  }catch(e){ toast('Failed: '+e.message, false); }
+}
+
+function openBulk(){ document.getElementById('bulkModal').classList.add('show'); }
+function closeBulk(){ document.getElementById('bulkModal').classList.remove('show'); }
+async function submitBulk(){
+  const srv = document.getElementById('bulkServer').value;
+  const mode = document.getElementById('bulkMode').value;
+  const text = document.getElementById('bulkText').value.trim();
+  if(!text) return toast('Paste UIDs first', false);
+  try{
+    const r = await api('/master/api/auto/bulk-upload',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, server_name:srv, mode, text})});
+    toast(`Imported ${r.imported} UIDs to ${srv}`, true);
+    document.getElementById('bulkText').value = '';
+    closeBulk();
+    CURRENT_SERVER = srv;
+    loadAuto();
+  }catch(e){ toast('Bulk failed: '+e.message, false); }
+}
+
+/* =====================================================
+   TAB 2: PLAYER LOOKUP
+   ===================================================== */
+async function doLookup(){
+  const uid = document.getElementById('lookupUid').value.trim();
+  if(!/^\d+$/.test(uid)) return toast('Valid UID required', false);
+  document.getElementById('lookupResult').innerHTML =
+    '<div class="card"><div class="empty">⏳ Fetching player info…</div></div>';
+  try{
+    const data = await api('/master/api/player-info?uid='+encodeURIComponent(uid));
+    document.getElementById('lookupResult').innerHTML = renderDetailHtml(data, uid);
+  }catch(e){
+    document.getElementById('lookupResult').innerHTML =
+      `<div class="card"><div class="empty" style="color:#f87171">Failed: ${esc(e.message)}</div></div>`;
+  }
+}
+
+/* =====================================================
+   TAB 3: INFO STORE
+   ===================================================== */
+async function loadInfoStore(){
+  try{
+    const search = document.getElementById('infoSearch').value.trim();
+    const params = new URLSearchParams({page:INFO_PAGE, page_size:50});
+    if(search) params.set('search', search);
+    const data = await api('/master/api/info-store?'+params.toString());
+    const rows = data.rows || [];
+    document.getElementById('infoStorePageInfo').textContent =
+      `Page ${data.page} / ${data.pages||1} · Total ${data.total}`;
+    const el = document.getElementById('infoStoreList');
+    if(!rows.length){
+      el.innerHTML = '<div class="card"><div class="empty"><span class="ico">🗄️</span>No stored info yet</div></div>';
+      return;
+    }
+    el.innerHTML = rows.map(r=>{
+      const av = renderAvatar(r, 'info-avatar', r.nickname);
+      return `
+        <div class="info-row" onclick="openDetail('${r.uid}')">
+          ${av}
+          <div class="info-meta">
+            <div class="info-name">${esc(r.nickname||'Unknown')}</div>
+            <div class="info-uid">${esc(r.uid)}</div>
+            <div class="info-chips">
+              <span class="info-chip lvl">⭐ Lvl ${r.level??'—'}</span>
+              <span class="info-chip likes">💖 ${Number(r.likes||0).toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }catch(e){ toast('Info store failed: '+e.message, false); }
+}
+function infoStorePrev(){ if(INFO_PAGE>1){INFO_PAGE--;loadInfoStore();} }
+function infoStoreNext(){ INFO_PAGE++; loadInfoStore(); }
+document.getElementById('infoSearch').addEventListener('input',()=>{INFO_PAGE=1;loadInfoStore();});
+
+/* =====================================================
+   TAB 4: SETTINGS
+   ===================================================== */
+async function loadSettings(){
+  loadFiles(); loadKeys(); loadBlocked(); loadStats(); loadUsageDetail();
+}
+
+async function loadFiles(){
+  try{
+    const data = await api('/master/api/files');
+    document.getElementById('fileList').innerHTML = data.files.map(f => `
+      <div class="file-item" onclick="openFile('${f.name}')">
+        <div class="file-icon ${f.name.endsWith('.json')?'json':''}">
+          ${f.name.endsWith('.json')?'⚙️':'📄'}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div class="file-name">${f.name}</div>
+          <div class="file-meta">${f.exists ? (f.size+' B · '+f.lines+' ln') : 'missing'}</div>
+        </div>
+      </div>
+    `).join('');
+  }catch(e){ toast('Files load failed', false); }
+}
+async function openFile(name){
+  try{
+    const data = await api('/master/api/file?name='+encodeURIComponent(name));
+    CURRENT_FILE = name;
+    document.getElementById('editorName').textContent = name;
+    document.getElementById('editorArea').value = data.content || '';
+    document.getElementById('editorWrap').classList.remove('hidden');
+  }catch(e){ toast('Open failed: '+e.message, false); }
+}
+async function reloadFile(){ if(CURRENT_FILE) await openFile(CURRENT_FILE); }
+async function saveFile(){
+  if(!CURRENT_FILE) return;
+  try{
+    await api('/master/api/file',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, name:CURRENT_FILE,
+        content:document.getElementById('editorArea').value})});
+    toast('Saved '+CURRENT_FILE, true);
+    if(CURRENT_FILE==='auto.txt') loadAuto();
+  }catch(e){ toast('Save failed: '+e.message, false); }
+}
+
+async function loadKeys(){
+  try{
+    const data = await api('/master/api/keys');
+    const uk = Object.entries(data.allowed_keys || {});
+    document.getElementById('userKeysList').innerHTML = uk.length
+      ? uk.map(([k,v])=>`
+        <div class="kv-row">
+          <input class="user-key" value="${esc(k)}"/>
+          <input class="user-name" value="${esc(v)}"/>
+          <button class="kv-del" onclick="this.parentNode.remove()">✕</button>
+        </div>`).join('')
+      : '<div class="empty" style="padding:12px">No user keys</div>';
+    const mk = data.admin_keys || [];
+    document.getElementById('masterKeysList').innerHTML = mk.length
+      ? mk.map(k=>`
+        <div class="kv-row" style="grid-template-columns:1fr auto">
+          <input class="master-key" value="${esc(k)}"/>
+          <button class="kv-del" onclick="this.parentNode.remove()">✕</button>
+        </div>`).join('')
+      : '<div class="empty" style="padding:12px">No master keys</div>';
+    document.getElementById('resetTz').value = data.reset_tz || 'Asia/Dhaka';
+  }catch(e){ toast('Keys load failed: '+e.message, false); }
+}
+function addUserKey(){
+  const d = document.createElement('div');
+  d.className='kv-row';
+  d.innerHTML = `<input class="user-key" placeholder="MAHIR-USER-XXX"/>
+    <input class="user-name" placeholder="username"/>
+    <button class="kv-del" onclick="this.parentNode.remove()">✕</button>`;
+  document.getElementById('userKeysList').appendChild(d);
+}
+function addMasterKey(){
+  const d = document.createElement('div');
+  d.className='kv-row';
+  d.style.gridTemplateColumns='1fr auto';
+  d.innerHTML = `<input class="master-key" placeholder="MAHIR-MASTER-XXX"/>
+    <button class="kv-del" onclick="this.parentNode.remove()">✕</button>`;
+  document.getElementById('masterKeysList').appendChild(d);
+}
+async function saveKeys(){
+  const userKeys = {};
+  document.querySelectorAll('#userKeysList .user-key').forEach((el,i)=>{
+    const k = el.value.trim();
+    const n = document.querySelectorAll('#userKeysList .user-name')[i]?.value.trim() || k;
+    if(k) userKeys[k] = n;
+  });
+  const masterKeys = [];
+  document.querySelectorAll('#masterKeysList .master-key').forEach(el=>{
+    const k = el.value.trim(); if(k) masterKeys.push(k);
+  });
+  const resetTz = document.getElementById('resetTz').value.trim() || 'Asia/Dhaka';
+  try{
+    await api('/master/api/keys',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, allowed_keys:userKeys,
+        admin_keys:masterKeys, reset_tz:resetTz})});
+    toast('Keys saved', true);
+  }catch(e){ toast('Save failed: '+e.message, false); }
+}
+
+async function loadBlocked(){
+  try{
+    const data = await api('/master/api/blocked');
+    const list = data.blocked || [];
+    document.getElementById('blockedList').innerHTML = list.length
+      ? list.map(u=>`
+        <div class="info-row" style="cursor:default">
+          <div class="info-avatar-fb">🚫</div>
+          <div class="info-meta">
+            <div class="info-name">${esc(u)}</div>
+            <div class="info-uid">Blocked UID</div>
+          </div>
+          <button class="btn-sm success" onclick="doUnblockUid('${esc(u)}')">Unblock</button>
+        </div>`).join('')
+      : '<div class="empty" style="padding:12px">✅ No blocked UIDs</div>';
+  }catch(e){ toast('Blocked list failed: '+e.message, false); }
+}
+async function doBlockUid(){
+  const uid = document.getElementById('blockUidInput').value.trim();
+  if(!/^\d+$/.test(uid)) return toast('Valid UID required', false);
+  try{
+    await api('/master/api/block',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, uid})});
+    toast('Blocked '+uid, true);
+    document.getElementById('blockUidInput').value = '';
+    loadBlocked(); loadAuto();
+  }catch(e){ toast('Failed: '+e.message, false); }
+}
+async function doUnblockUid(uid){
+  try{
+    await api('/master/api/unblock',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, uid})});
+    toast('Unblocked '+uid, true);
+    loadBlocked(); loadAuto();
+  }catch(e){ toast('Failed: '+e.message, false); }
+}
+
+async function loadStats(){
+  try{
+    const data = await api('/master/api/stats');
+    const totalAuto = Object.values(data.auto_targets||{}).reduce((a,b)=>a+b,0);
+    const cells = [
+      {l:'Auto UIDs', v:totalAuto, c:'#a78bfa'},
+      {l:"Today's Req", v:data.total_today_requests||0, c:'#4ade80'},
+      {l:'User Keys', v:data.keys_count?.user||0, c:'#67e8f9'},
+      {l:'Master Keys', v:data.keys_count?.master||0, c:'#fbbf24'},
+      {l:'Blocked', v:data.blocked_count||0, c:'#f87171'},
+      {l:'Servers', v:Object.keys(SERVER_FLAGS).length, c:'#c4b5fd'}
+    ];
+    document.getElementById('statsGrid').innerHTML = cells.map(c=>`
+      <div class="detail-item">
+        <div class="lbl">${c.l}</div>
+        <div class="val" style="color:${c.c};font-size:16px">${c.v}</div>
+      </div>
+    `).join('');
+  }catch(e){ toast('Stats failed: '+e.message, false); }
+}
+
+async function loadUsageDetail(){
+  const date = document.getElementById('usageDate').value ||
+               new Date().toISOString().slice(0,10);
+  try{
+    const data = await api('/master/api/usage-detail?date='+encodeURIComponent(date));
+    const rows = data.rows || [];
+    document.getElementById('usageTableBody').innerHTML = rows.length
+      ? rows.map(r=>`
+        <div class="info-row" onclick="openDetail('${r.uid}')">
+          <div class="info-avatar-fb">📊</div>
+          <div class="info-meta">
+            <div class="info-name">${esc(r.nickname||'UID '+r.uid)}</div>
+            <div class="info-uid">${esc(r.uid)} · ${esc(r.server||'')} · ${esc(r.last_at||'')}</div>
+          </div>
+          <span class="hb count">+${r.likes_given_total}</span>
+        </div>`).join('')
+      : '<div class="empty" style="padding:12px">No activity</div>';
+  }catch(e){ toast('Usage failed: '+e.message, false); }
+}
+
+async function refreshJwt(){
+  if(!confirm('Force JWT refresh for all servers?')) return;
+  try{
+    const data = await api('/master/api/jwt-refresh',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY})});
+    toast('JWT refresh complete', true);
+  }catch(e){ toast('Failed: '+e.message, false); }
+}
+
+/* =====================================================
+   PLAYER DETAIL MODAL
+   ===================================================== */
+function closeDetail(){ document.getElementById('detailModal').classList.remove('show'); }
+
+async function openDetail(uid){
+  const m = document.getElementById('detailModal');
+  m.classList.add('show');
+  document.getElementById('detailTitle').textContent = 'UID: '+uid;
+  document.getElementById('detailBody').innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    const data = await api('/master/api/player-info?uid='+encodeURIComponent(uid));
+    document.getElementById('detailBody').innerHTML = renderDetailHtml(data, uid);
+  }catch(e){
+    document.getElementById('detailBody').innerHTML =
+      `<div class="empty" style="color:#f87171">Failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderDetailHtml(data, uid){
+  const av = renderAvatar(data, 'pcard-avatar', data.nickname);
+  // size override for modal
+  const avHtml = av
+    .replace('class="pcard-avatar"', 'class="pcard-avatar" style="width:80px;height:80px"')
+    .replace('class="pcard-avatar-fb"',
+      'class="pcard-avatar-fb" style="width:80px;height:80px;font-size:30px"');
+
+  const agg = data.aggregate || {total_likes:0, total_requests:0, per_day:[]};
+  const days = (agg.per_day||[]).map(d=>{
+    const t = d.last_ts ? new Date(d.last_ts*1000).toLocaleString([],{hour:'2-digit',minute:'2-digit'}) : '';
+    return `
+      <div class="detail-item" style="grid-column:1/-1">
+        <div class="lbl" style="display:flex;justify-content:space-between">
+          <span>${esc(d.like_date)}</span><span style="color:var(--text-mute)">${t}</span>
+        </div>
+        <div class="val" style="color:var(--purple-hi)">❤ ${d.likes} likes · ${d.requests} req · ${esc(d.last_status||'')}</div>
+      </div>`;
+  }).join('') || '<div class="empty">No history</div>';
+
+  return `
+    <div class="pcard" style="margin:0 0 14px 0;cursor:default">
+      <div class="pcard-row">
+        ${avHtml}
+        <div class="pcard-info">
+          <div class="pcard-name" style="font-size:17px">${esc(data.nickname||'Unknown')}</div>
+          <div class="pcard-uid">${esc(uid)}</div>
+          <div class="pcard-chips">
+            <span class="pchip lvl">⭐ Lvl ${data.level??'—'}</span>
+            <span class="pchip likes">💖 ${Number(data.likes||0).toLocaleString()}</span>
+            ${data.clanName?`<span class="pchip clan">👑 ${esc(data.clanName)}</span>`:''}
+            ${data.is_blocked?'<span class="pchip" style="background:rgba(239,68,68,.25);border-color:rgba(239,68,68,.5);color:#fca5a5">🚫 BLOCKED</span>':''}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-item"><div class="lbl">BR Rank</div><div class="val">${data.rank??'—'}</div></div>
+      <div class="detail-item"><div class="lbl">CS Rank</div><div class="val">${data.csRank??'—'}</div></div>
+      <div class="detail-item"><div class="lbl">Region</div><div class="val">${esc(data.region||'—')}</div></div>
+      <div class="detail-item"><div class="lbl">Credit Score</div><div class="val">${data.creditScore??'—'}</div></div>
+      <div class="detail-item"><div class="lbl">Guild</div><div class="val">${esc(data.clanName||'—')}</div></div>
+      <div class="detail-item"><div class="lbl">Guild ID</div><div class="val">${esc(String(data.clanId||'—'))}</div></div>
+      <div class="detail-item"><div class="lbl">Guild Level</div><div class="val">${data.clanLevel??'—'}</div></div>
+      <div class="detail-item"><div class="lbl">Members</div><div class="val">${data.clanMemberNum??'—'} / ${data.clanCapacity??'—'}</div></div>
+      <div class="detail-item"><div class="lbl">Pet</div><div class="val">${esc(data.petName||'—')} (Lv${data.petLevel??'—'})</div></div>
+      <div class="detail-item"><div class="lbl">Duo Level</div><div class="val">${data.duoLevel??'—'} · Score ${data.duoScore??'—'}</div></div>
+      <div class="detail-item"><div class="lbl">Duo Partner</div><div class="val">${esc(data.duoPartnerUid||'—')}</div></div>
+      <div class="detail-item"><div class="lbl">Duo Status</div><div class="val">${esc(data.duoStatus||'—')}</div></div>
+      <div class="detail-item"><div class="lbl">Last Login</div><div class="val">${esc(data.lastLogin||'—')}</div></div>
+      <div class="detail-item"><div class="lbl">Account Age</div><div class="val">${esc(data.accountAge||'—')}</div></div>
+      <div class="detail-item" style="grid-column:1/-1"><div class="lbl">Created</div><div class="val">${esc(data.created||'—')}</div></div>
+    </div>
+
+    ${data.signature?`<div style="margin-top:12px;padding:11px;background:#0a0a10;
+      border:1px solid var(--border);border-radius:10px;font-size:12px;
+      color:var(--text-dim);line-height:1.5">${esc(data.signature)}</div>`:''}
+
+    <div style="display:flex;gap:6px;margin-top:14px;margin-bottom:10px;flex-wrap:wrap">
+      <span class="pchip likes">❤ ${agg.total_likes} total</span>
+      <span class="pchip lvl">${agg.total_requests} requests</span>
+    </div>
+
+    <div style="font-size:12px;color:var(--text-dim);margin:12px 0 8px">📅 Per-day history:</div>
+    <div class="detail-grid">${days}</div>
+
+    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+      ${data.is_blocked
+        ? `<button class="btn-sm success" style="flex:1;justify-content:center;padding:12px"
+              onclick="unblockFromDetail('${esc(uid)}')">✅ Unblock</button>`
+        : `<button class="btn-sm danger" style="flex:1;justify-content:center;padding:12px"
+              onclick="blockFromDetail('${esc(uid)}')">🚫 Block</button>`}
+    </div>
+  `;
+}
+
+async function blockFromDetail(uid){
+  if(!confirm('Block '+uid+'?')) return;
+  try{
+    await api('/master/api/block',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, uid})});
+    toast('Blocked', true);
+    openDetail(uid); loadAuto(); loadBlocked();
+  }catch(e){ toast('Failed: '+e.message, false); }
+}
+async function unblockFromDetail(uid){
+  try{
+    await api('/master/api/unblock',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({key:MASTER_KEY, uid})});
+    toast('Unblocked', true);
+    openDetail(uid); loadAuto(); loadBlocked();
+  }catch(e){ toast('Failed: '+e.message, false); }
+}
+
+/* --------- INIT --------- */
+document.getElementById('masterKey').addEventListener('keydown',
+  e=>{if(e.key==='Enter')doLogin();});
+document.getElementById('lookupUid').addEventListener('keydown',
+  e=>{if(e.key==='Enter')doLookup();});
+document.getElementById('lookupUid').addEventListener('keydown',
+  e=>{if(e.key==='Enter')doLookup();});
+
+if(MASTER_KEY) verifyAndEnter();
+</script>
+</body>
+</html>

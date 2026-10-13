@@ -1,0 +1,8 @@
+{
+  "ALLOWED_KEYS": {},
+  "ADMIN_KEYS": [
+    "OWNER-MAHIR",
+    "ADMIN-JONI"
+  ],
+  "RESET_TZ": "Asia/Dhaka"
+}
